@@ -4,6 +4,7 @@ import type { SyncedWaveforms } from '../lib/waveforms'
 interface Props {
   syncedRef: React.MutableRefObject<SyncedWaveforms | null>
   isPlaying: boolean
+  trackIndex: number
 }
 
 // Particle pool for the vectorscope
@@ -18,7 +19,7 @@ interface Particle {
 const MAX_PARTICLES = 2000
 const PARTICLE_LIFESPAN = 40 // frames
 
-export default function SpaceAnalyzer({ syncedRef, isPlaying }: Props) {
+export default function SpaceAnalyzer({ syncedRef, isPlaying, trackIndex }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
 
@@ -30,8 +31,9 @@ export default function SpaceAnalyzer({ syncedRef, isPlaying }: Props) {
     const ctx = canvas.getContext('2d', { alpha: false })
     if (!ctx) return
 
-    const analyserL = synced.getAnalyserL()
-    const analyserR = synced.getAnalyserR()
+    const analyserL = synced.getTrackAnalyserL(trackIndex)
+    const analyserR = synced.getTrackAnalyserR(trackIndex)
+    if (!analyserL || !analyserR) return
     analyserL.fftSize = 2048
     analyserR.fftSize = 2048
     const bufLen = analyserL.frequencyBinCount
@@ -303,7 +305,7 @@ export default function SpaceAnalyzer({ syncedRef, isPlaying }: Props) {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
-  }, [syncedRef, isPlaying])
+  }, [syncedRef, isPlaying, trackIndex])
 
   return (
     <div className="analyzer-panel">

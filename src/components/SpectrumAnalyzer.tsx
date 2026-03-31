@@ -4,6 +4,7 @@ import type { SyncedWaveforms } from '../lib/waveforms'
 interface Props {
   syncedRef: React.MutableRefObject<SyncedWaveforms | null>
   isPlaying: boolean
+  trackIndex: number
 }
 
 // Map every FFT bin to a logarithmic x-position for a smooth high-res line
@@ -27,7 +28,7 @@ function dbToY(db: number, _h: number, top: number, bottom: number): number {
   return top + ((DB_MAX - clamped) / (DB_MAX - DB_MIN)) * (bottom - top)
 }
 
-export default function SpectrumAnalyzer({ syncedRef, isPlaying }: Props) {
+export default function SpectrumAnalyzer({ syncedRef, isPlaying, trackIndex }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
 
@@ -39,7 +40,8 @@ export default function SpectrumAnalyzer({ syncedRef, isPlaying }: Props) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const analyser = synced.getAnalyser()
+    const analyser = synced.getTrackAnalyser(trackIndex)
+    if (!analyser) return
     analyser.fftSize = 8192 // Higher resolution
     analyser.smoothingTimeConstant = 0.75
     const sampleRate = synced.getSampleRate()
@@ -47,8 +49,9 @@ export default function SpectrumAnalyzer({ syncedRef, isPlaying }: Props) {
     const dataArr = new Float32Array(bufLen)
     const binHz = sampleRate / analyser.fftSize
 
-    // Smoothed dB values per bin
-    const smoothed = new Float32Array(bufLen).fill(DB_MIN)
+    // Smoothed dB values per bin — seed from current data to avoid slow ramp-up
+    const smoothed = new Float32Array(bufLen)
+    analyser.getFloatFrequencyData(smoothed)
 
     function draw() {
       const w = cssW
@@ -143,7 +146,7 @@ export default function SpectrumAnalyzer({ syncedRef, isPlaying }: Props) {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
-  }, [syncedRef, isPlaying])
+  }, [syncedRef, isPlaying, trackIndex])
 
   return (
     <div className="analyzer-panel">

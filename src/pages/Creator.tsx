@@ -1,10 +1,11 @@
 import { useState, useRef, useId } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useMutation } from '@tanstack/react-query'
 import { getSDK } from '../lib/audius'
 import { Genre } from '@audius/sdk/src/sdk/api/generated/default/models/Genre'
 
-const LABELS = ['A', 'B', 'C', 'D']
-const MAX_SLOTS = 4
+const LABELS = ['A', 'B']
+const MAX_SLOTS = 2
 
 function isAudioFile(file: File): boolean {
   return file.type.startsWith('audio/') || /\.(mp3|wav|flac|aiff?|ogg|m4a|aac)$/i.test(file.name)
@@ -34,11 +35,82 @@ export default function Creator() {
 
   const [slots, setSlots] = useState<TrackSlot[]>([makeSlot(nextId())])
   const [question, setQuestion] = useState('')
-  const [phase, setPhase] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
-  const [statusMsg, setStatusMsg] = useState('')
-  const [generatedUrl, setGeneratedUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const navigate = useNavigate()
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const filled = slots.filter((s) => s.file !== null)
+      if (filled.length < 1) throw new Error('Add at least one track.')
+
+      const sdk = getSDK()
+
+      const isAuth = await sdk.oauth.isAuthenticated()
+      if (!isAuth) await sdk.oauth.login({ scope: 'write' })
+      const user = await sdk.oauth.getUser()
+
+      const trackIds = await Promise.all(
+        filled.map((slot, i) => {
+          const slotId = slot.id
+          const updateProgress = (pct: number) => {
+            setSlots((prev) =>
+              prev.map((s) =>
+                s.id === slotId ? { ...s, progress: 'uploading' as const, uploadPct: pct } : s
+              )
+            )
+          }
+
+          const upload = sdk.uploads.createAudioUpload({
+            file: slot.file!,
+            onProgress: ({ loaded, total }) => updateProgress((loaded / total) * 100),
+          })
+
+          return upload.start().then(async (uploadResult) => {
+            const { trackCid, origFileCid, duration } = uploadResult
+            if (!trackCid) throw new Error('Upload failed: no trackCid')
+
+            const result = await sdk.tracks.createTrack({
+              userId: user.id,
+              metadata: {
+                title: slot.title || LABELS[i] || `Track ${i + 1}`,
+                genre: Genre.Electronic,
+                isUnlisted: true,
+                trackCid,
+                origFileCid,
+                duration,
+              },
+            })
+            if (!result.trackId) throw new Error(`Track creation failed for "${slot.title}"`)
+
+            setSlots((prev) =>
+              prev.map((s) =>
+                s.id === slotId ? { ...s, progress: 'done' as const, uploadedTrackId: result.trackId!, uploadPct: 100 } : s
+              )
+            )
+            return result.trackId
+          })
+        })
+      )
+
+      const now = Math.floor(Date.now() / 1000)
+      const titles = filled.map((s) => s.title)
+      const defaultName = titles.length >= 2
+        ? `AB Test: ${titles[0]} vs ${titles[1]}`
+        : `Feedback Request: ${titles[0]}`
+      const result = await sdk.playlists.createPlaylist({
+        userId: user.id,
+        metadata: {
+          playlistName: defaultName,
+          description: question.trim() || undefined,
+          isPrivate: true,
+          playlistContents: trackIds.map((id) => ({ trackId: id, timestamp: now })),
+        },
+      })
+      if (!result.playlistId) throw new Error('Playlist creation failed')
+
+      return `${window.location.origin}/listen/${result.playlistId}`
+    },
+  })
 
   // Slots that have a file
   const filledSlots = slots.filter((s) => s.file !== null)
@@ -81,124 +153,33 @@ export default function Creator() {
     })
   }
 
-  async function handleCreate() {
-    if (filledSlots.length < 1) {
-      setStatusMsg('Add at least 1 track.')
-      return
-    }
-    setPhase('uploading')
-    setStatusMsg('')
-
-    const sdk = getSDK()
-
-    try {
-      // Auth
-      const isAuth = await sdk.oauth.isAuthenticated()
-      if (!isAuth) {
-        setStatusMsg('Opening Audius login…')
-        await sdk.oauth.login({ scope: 'write' })
-      }
-      const user = await sdk.oauth.getUser()
-      setStatusMsg(`Logged in as @${user.handle}`)
-
-      // Upload tracks in parallel
-      setStatusMsg('Uploading tracks…')
-      const trackIds = await Promise.all(
-        filledSlots.map((slot, i) => {
-          const slotId = slot.id
-          const updateProgress = (pct: number) => {
-            setSlots((prev) =>
-              prev.map((s) =>
-                s.id === slotId ? { ...s, progress: 'uploading' as const, uploadPct: pct } : s
-              )
-            )
-          }
-
-          // Step 1: Upload audio
-          const upload = sdk.uploads.createAudioUpload({
-            file: slot.file!,
-            onProgress: ({ loaded, total }) => updateProgress((loaded / total) * 100),
-          })
-
-          return upload.start().then(async (uploadResult) => {
-            const { trackCid, origFileCid, duration } = uploadResult
-            if (!trackCid) throw new Error('Upload failed: no trackCid')
-
-            // Step 2: Create track on-chain
-            const result = await sdk.tracks.createTrack({
-              userId: user.id,
-              metadata: {
-                title: slot.title || LABELS[i] || `Track ${i + 1}`,
-                genre: Genre.Electronic,
-                isUnlisted: true,
-                trackCid,
-                origFileCid,
-                duration,
-              },
-            })
-            if (!result.trackId) throw new Error(`Track creation failed for "${slot.title}"`)
-
-            setSlots((prev) =>
-              prev.map((s) =>
-                s.id === slotId ? { ...s, progress: 'done' as const, uploadedTrackId: result.trackId!, uploadPct: 100 } : s
-              )
-            )
-            return result.trackId
-          })
-        })
-      )
-
-      // Create playlist
-      setStatusMsg('Creating playlist…')
-      const now = Math.floor(Date.now() / 1000)
-      const result = await sdk.playlists.createPlaylist({
-        userId: user.id,
-        metadata: {
-          playlistName: `AB: ${question.trim().slice(0, 50) || 'Untitled'}`,
-          description: question.trim() || undefined,
-          isPrivate: true,
-          playlistContents: trackIds.map((id) => ({ trackId: id, timestamp: now })),
-        },
-      })
-      if (!result.playlistId) throw new Error('Playlist creation failed')
-
-      const url = `${window.location.origin}/listen/${result.playlistId}`
-      setGeneratedUrl(url)
-      setPhase('done')
-      setStatusMsg('')
-    } catch (err) {
-      setPhase('error')
-      setStatusMsg(err instanceof Error ? err.message : 'Unknown error')
-    }
-  }
-
   function handleCopy() {
-    if (!generatedUrl) return
-    navigator.clipboard.writeText(generatedUrl)
+    if (!mutation.data) return
+    navigator.clipboard.writeText(mutation.data)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const canCreate = filledSlots.length >= 1 && phase === 'idle'
-
   return (
-    <div className="page">
-      <div className="page-header">
+    <div className="page creator-page">
+      <div className="page-header creator-header">
         <h1>Audius AB</h1>
-        <p>Upload 1–4 tracks and get feedback on your mix.</p>
+        <p>Upload 1–2 tracks and get feedback on your mix.</p>
       </div>
 
       <div className="creator-slots">
         {slots.map((slot, i) => {
           const label = LABELS[i] ?? `${i + 1}`
           const isEmpty = slot.file === null
-          if (isEmpty && !showEmptySlot) return null
+          if (isEmpty && (!showEmptySlot || mutation.isPending || mutation.isSuccess)) return null
           return (
             <Dropzone
               key={slot.id}
               slot={slot}
               label={label}
               isEmpty={isEmpty}
+              disabled={mutation.isPending}
+              done={mutation.isSuccess}
               onFile={(file) => handleFileDrop(slot.id, file)}
               onInputChange={(e) => handleFileInput(slot.id, e)}
               onRemove={() => removeSlot(slot.id)}
@@ -215,42 +196,39 @@ export default function Creator() {
           placeholder="Which mix translates better on small speakers?"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          disabled={phase === 'uploading'}
+          disabled={mutation.isPending}
         />
       </div>
 
-      {phase !== 'done' && (
+      {!mutation.isSuccess && (
         <button
           type="button"
           className="btn-primary"
-          onClick={handleCreate}
-          disabled={!canCreate}
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
         >
-          {phase === 'uploading' ? 'Creating…' : 'Create Link'}
+          {mutation.isPending ? <><span className="spinner spinner-btn" /> Creating…</> : 'Create Link'}
         </button>
       )}
 
-      {statusMsg && (
-        <p className={`status-msg${phase === 'error' ? ' error' : ''}`}>{statusMsg}</p>
+      {mutation.isError && (
+        <p className="status-msg error">{mutation.error.message}</p>
       )}
 
-      {generatedUrl && (
+      {mutation.data ? (
         <div className="result-box">
           <p>Share this link with listeners:</p>
           <div className="result-url">
-            <label htmlFor="generated-url" className="sr-only">Generated URL</label>
-            <input id="generated-url" type="text" readOnly value={generatedUrl} aria-label="Generated sharing URL" />
+            <input id="generated-url" type="text" readOnly value={mutation.data} aria-label="Generated sharing URL" />
             <button type="button" className="btn-copy" onClick={handleCopy} aria-label="Copy URL to clipboard">
               {copied ? 'Copied!' : 'Copy'}
             </button>
-          </div>
-          <div className="result-actions">
-            <button type="button" className="btn-secondary" onClick={() => navigate(`/listen/${generatedUrl.split('/listen/')[1]}`)}>
-              Open Link
+            <button type="button" className="btn-secondary" onClick={() => navigate(`/listen/${mutation.data.split('/listen/')[1]}`)}>
+              View
             </button>
           </div>
         </div>
-      )}
+      ): null}
     </div>
   )
 }
@@ -259,13 +237,15 @@ interface DropzoneProps {
   slot: TrackSlot
   label: string
   isEmpty: boolean
+  disabled: boolean
+  done: boolean
   onFile: (file: File) => void
   onInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   onRemove: () => void
   onTitleChange: (title: string) => void
 }
 
-function Dropzone({ slot, label, isEmpty, onFile, onInputChange, onRemove, onTitleChange }: DropzoneProps) {
+function Dropzone({ slot, label, isEmpty, disabled, done, onFile, onInputChange, onRemove, onTitleChange }: DropzoneProps) {
   const [dragOver, setDragOver] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -303,24 +283,32 @@ function Dropzone({ slot, label, isEmpty, onFile, onInputChange, onRemove, onTit
     <div className="dropzone has-file">
       <div className="dropzone-filename">
         <span className="label-badge">{label}</span>
-        <label htmlFor={`track-title-${slot.id}`} className="sr-only">Track title</label>
-        <input
-          id={`track-title-${slot.id}`}
-          type="text"
-          value={slot.title}
-          onChange={(e) => onTitleChange(e.target.value)}
-          className="track-title-input"
-          placeholder="Track title"
-        />
-        <button type="button" className="dropzone-remove" onClick={onRemove} title="Remove">×</button>
+        {done ? (
+          <span className="track-title-text">{slot.title}</span>
+        ) : (
+          <>
+            <label htmlFor={`track-title-${slot.id}`} className="sr-only">Track title</label>
+            <input
+              id={`track-title-${slot.id}`}
+              type="text"
+              value={slot.title}
+              onChange={(e) => onTitleChange(e.target.value)}
+              className="track-title-input"
+              placeholder="Track title"
+              disabled={disabled}
+            />
+          </>
+        )}
+        {slot.progress === 'done' ? (
+          <span className="dropzone-status-icon done" title="Uploaded">✓</span>
+        ) : slot.progress === 'uploading' ? (
+          <span className="dropzone-status-icon"><span className="spinner spinner-md" /></span>
+        ) : (
+          <button type="button" className="dropzone-remove" onClick={onRemove} title="Remove">×</button>
+        )}
       </div>
       {slot.progress === 'uploading' && (
-        <div className="progress-bar-wrap">
-          <div className="progress-bar" style={{ width: `${slot.uploadPct}%` }} />
-        </div>
-      )}
-      {slot.progress === 'done' && (
-        <div className="upload-done">✓ Uploaded</div>
+        <progress className="upload-progress" value={slot.uploadPct} max={100} />
       )}
     </div>
   )

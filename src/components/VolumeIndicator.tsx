@@ -4,6 +4,7 @@ import type { SyncedWaveforms } from '../lib/waveforms'
 interface Props {
   syncedRef: React.MutableRefObject<SyncedWaveforms | null>
   isPlaying: boolean
+  trackIndex: number
 }
 
 // EBU R128 short-term integration = 3 seconds
@@ -21,7 +22,7 @@ const METRIC_LABELS: Record<GraphMetric, string> = {
   integrated: 'Integrated LUFS',
 }
 
-export default function VolumeIndicator({ syncedRef, isPlaying }: Props) {
+export default function VolumeIndicator({ syncedRef, isPlaying, trackIndex }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
   const [graphMetric, setGraphMetric] = useState<GraphMetric>('short')
@@ -36,7 +37,8 @@ export default function VolumeIndicator({ syncedRef, isPlaying }: Props) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const analyser = synced.getAnalyser()
+    const analyser = synced.getTrackAnalyser(trackIndex)
+    if (!analyser) return
     const bufLen = analyser.frequencyBinCount
     const timeDomain = new Float32Array(bufLen)
 
@@ -353,7 +355,7 @@ export default function VolumeIndicator({ syncedRef, isPlaying }: Props) {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
-  }, [syncedRef, isPlaying])
+  }, [syncedRef, isPlaying, trackIndex])
 
   return (
     <div className="analyzer-panel analyzer-panel-wide">

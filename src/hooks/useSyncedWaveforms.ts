@@ -4,12 +4,18 @@ import { SyncedWaveforms } from "../lib/waveforms";
 export function useSyncedWaveforms(
   containerRefs: React.MutableRefObject<(HTMLDivElement | null)[]>,
   streamUrls: string[],
-  preloadedPeaks?: number[][],
+  onSeekWhilePaused?: (time: number) => void,
+  onFinish?: () => void,
 ) {
   const syncedRef = useRef<SyncedWaveforms | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [trackDurations, setTrackDurations] = useState<number[]>([]);
+  const seekWhilePausedRef = useRef(onSeekWhilePaused);
+  seekWhilePausedRef.current = onSeekWhilePaused;
+  const finishRef = useRef(onFinish);
+  finishRef.current = onFinish;
 
   const urlKey = streamUrls.join(",");
 
@@ -29,12 +35,19 @@ export function useSyncedWaveforms(
     synced.onReady(() => {
       setIsReady(true);
       setDuration(synced.getDuration());
+      setTrackDurations(synced.getTrackDurations());
     });
     synced.onTimeUpdate((t, d) => {
       setCurrentTime(t);
       setDuration(d);
     });
-    synced.load(streamUrls, preloadedPeaks);
+    synced.onSeekWhilePaused((t) => {
+      seekWhilePausedRef.current?.(t);
+    });
+    synced.onFinish(() => {
+      finishRef.current?.();
+    });
+    synced.load(streamUrls);
 
     return () => {
       synced.destroy();
@@ -47,6 +60,7 @@ export function useSyncedWaveforms(
     isReady,
     currentTime,
     duration,
+    trackDurations,
     play: () => syncedRef.current?.play(),
     pause: () => syncedRef.current?.pause(),
     seek: (progress: number) => syncedRef.current?.seek(progress),

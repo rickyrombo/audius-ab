@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { decodeHashId } from '@audius/sdk'
 import { getSDK } from '../lib/audius'
 import { useSyncedWaveforms } from '../hooks/useSyncedWaveforms'
@@ -8,7 +8,7 @@ import SpectrumAnalyzer from '../components/SpectrumAnalyzer'
 import SpaceAnalyzer from '../components/SpaceAnalyzer'
 import VolumeIndicator from '../components/VolumeIndicator'
 
-const LABELS = ['A', 'B', 'C', 'D']
+const LABELS = ['A', 'B']
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -24,6 +24,7 @@ interface TrackInfo {
 
 interface CommentDisplay {
   id: string
+  userId: string
   handle: string
   body: string
   timestampSeconds: number
@@ -31,46 +32,67 @@ interface CommentDisplay {
 
 export default function Listener() {
   const { playlistId } = useParams<{ playlistId: string }>()
+  const navigate = useNavigate()
 
   const [description, setDescription] = useState('')
+  const [playlistName, setPlaylistName] = useState('Audius AB')
   const [tracks, setTracks] = useState<TrackInfo[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [commentTrackIdx, setCommentTrackIdx] = useState(0)
+  const [commentTime, setCommentTime] = useState<number | null>(null)
   const [favorited, setFavorited] = useState<Set<string>>(new Set())
   const [submittingComment, setSubmittingComment] = useState(false)
-  const [waveformPeaks, setWaveformPeaks] = useState<number[][]>([])
+  const [ownerId, setOwnerId] = useState<string | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserHandle, setCurrentUserHandle] = useState<string | null>(null)
+  const [showHelp, setShowHelp] = useState(false)
 
   const containerRefs = useRef<(HTMLDivElement | null)[]>([])
+  const commentTextareaRefs = useRef<(HTMLTextAreaElement | null)[]>([])
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const skipFocusTimeRef = useRef(false)
   const queryClient = useQueryClient()
 
-  const activeTrackId = tracks[commentTrackIdx]?.id
-  const { data: comments = [] } = useQuery({
-    queryKey: ['comments', activeTrackId],
-    queryFn: async (): Promise<CommentDisplay[]> => {
-      if (!activeTrackId) return []
-      const sdk = getSDK()
-      const resp = await sdk.tracks.getTrackComments({ trackId: activeTrackId })
-      const items = resp.data ?? []
-      const users = resp.related?.users ?? []
-      const handleMap = new Map(users.map((u) => [u.id, u.handle]))
-      return items.map((c) => ({
-        id: c.id,
-        handle: (c.userId && handleMap.get(c.userId)) ?? c.userId ?? 'anon',
-        body: c.message,
-        timestampSeconds: c.trackTimestampS ?? 0,
-      }))
-    },
-    enabled: !!activeTrackId,
-    staleTime: Infinity,
+  const commentQueries = useQueries({
+    queries: tracks.map((t) => ({
+      queryKey: ['comments', t.id],
+      queryFn: async (): Promise<CommentDisplay[]> => {
+        const sdk = getSDK()
+        const resp = await sdk.tracks.getTrackComments({ trackId: t.id })
+        const items = resp.data ?? []
+        const users = resp.related?.users ?? []
+        const handleMap = new Map(users.map((u) => [u.id, u.handle]))
+        return items.map((c) => ({
+          id: c.id,
+          userId: c.userId ?? '',
+          handle: (c.userId && handleMap.get(c.userId)) ?? c.userId ?? 'anon',
+          body: c.message,
+          timestampSeconds: c.trackTimestampS ?? 0,
+        }))
+      },
+      enabled: !!t.id,
+      staleTime: Infinity,
+    })),
+  })
+  const allComments = commentQueries.map((q) => {
+    const comments = q.data ?? []
+    if (!ownerId && !currentUserId) return comments
+    return comments.filter((c) => 
+      (ownerId && c.userId === ownerId) || (currentUserId && c.userId === currentUserId)
+    )
   })
 
   const streamUrls = tracks.map((t) => t.streamUrl)
 
-  const { isReady, currentTime, duration, play, pause, seek, setActive, syncedRef } =
-    useSyncedWaveforms(containerRefs, streamUrls, waveformPeaks.length === streamUrls.length ? waveformPeaks : undefined)
+  const { isReady, currentTime, duration, trackDurations, play, pause, seek, setActive, syncedRef } =
+    useSyncedWaveforms(containerRefs, streamUrls, (time) => {
+      setCommentTime(time)
+    }, () => {
+      setIsPlaying(false)
+    })
 
   // Load playlist + tracks on mount
   useEffect(() => {
@@ -88,37 +110,35 @@ export default function Listener() {
         if (cancelled) return
 
         setDescription(playlist.description ?? '')
+        if (playlist.user?.id) setOwnerId(playlist.user.id)
 
-        // Fetch tracks with stream URLs
-        const trackItems = playlist.tracks ?? []
-        if (!trackItems.length) throw new Error('No tracks in playlist')
+        // Get track IDs from playlist_contents
+        const contents = (playlist as any).playlistContents ?? (playlist as any).playlist_contents ?? []
+        const trackIds: string[] = contents
+          .map((c: any) => c.trackId ?? c.track_id)
+          .filter(Boolean)
+        if (!trackIds.length) throw new Error('No tracks in playlist')
         if (cancelled) return
 
-        const trackInfos: TrackInfo[] = trackItems.map((t) => ({
-          id: t.id,
-          title: t.title,
-          streamUrl: t.stream?.url ?? t.stream?.mirrors?.[0] ?? '',
-        }))
-
-        // Fetch waveform data from Phoenix API
-        const numericIds = trackItems.map((t) => decodeHashId(t.id))
-        try {
-          const waveforms = await Promise.all(
-            numericIds.map(async (numId) => {
-              const resp = await fetch(`/api/phoenix/tracks?id=${numId}`)
-              const json = await resp.json()
-              return json.data?.[0]?.waveform as number[] | undefined
-            })
-          )
-          if (!cancelled) {
-            const validPeaks = waveforms.filter((w): w is number[] => Array.isArray(w))
-            if (validPeaks.length === trackInfos.length) {
-              setWaveformPeaks(validPeaks)
+        // Fetch tracks in bulk
+        const bulkResp = await sdk.tracks.getBulkTracks({ id: trackIds })
+        const bulkTracks = bulkResp.data ?? []
+        const trackInfos: TrackInfo[] = trackIds
+          .map((id) => {
+            const t = bulkTracks.find((bt: any) => bt.id === id)
+            if (!t) return null
+            return {
+              id: t.id,
+              title: t.title,
+              streamUrl: t.stream?.url ?? t.stream?.mirrors?.[0] ?? '',
             }
-          }
-        } catch {
-          // Waveform fetch failed — will fall back to client-side decoding
-        }
+          })
+          .filter((t): t is TrackInfo => t !== null)
+
+        const fallbackName = trackInfos.length >= 2
+          ? `Audius AB: ${trackInfos[0].title} vs ${trackInfos[1].title}`
+          : `Audius AB: ${trackInfos[0].title}`
+        setPlaylistName(playlist.playlistName || fallbackName)
 
         if (!cancelled) {
           setTracks(trackInfos)
@@ -131,6 +151,18 @@ export default function Listener() {
     load()
     return () => { cancelled = true }
   }, [playlistId])
+
+  // Check if user is already logged in (don't force login)
+  useEffect(() => {
+    const sdk = getSDK()
+    sdk.oauth.isAuthenticated().then(async (isAuth) => {
+      if (isAuth) {
+        const user = await sdk.oauth.getUser()
+        if (user?.id) setCurrentUserId(user.id)
+        if (user?.handle) setCurrentUserHandle(user.handle)
+      }
+    }).catch(() => {})
+  }, [])
 
   // Keep containerRefs array sized correctly when tracks load
   useEffect(() => {
@@ -199,7 +231,16 @@ export default function Listener() {
         return
       }
 
-      const numIdx = ['1', '2', '3', '4'].indexOf(e.key)
+      if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault()
+        const idx = activeIndexRef.current
+        setCommentTrackIdx(idx)
+        setCommentTime(currentTimeRef.current)
+        commentTextareaRefs.current[idx]?.focus()
+        return
+      }
+
+      const numIdx = ['1', '2'].indexOf(e.key)
       if (numIdx !== -1 && numIdx < tracks.length) {
         handleToggleTrack(numIdx)
         return
@@ -259,6 +300,62 @@ export default function Listener() {
     setCommentTrackIdx(i)
   }
 
+  function renderCommentForm(i: number) {
+    return (
+      <div className="comment-form">
+        <textarea
+          ref={(el) => { commentTextareaRefs.current[i] = el }}
+          rows={1}
+          placeholder={tracks.length > 1 ? `Comment on ${LABELS[i]}…` : 'Leave a comment…'}
+          value={commentTrackIdx === i ? commentText : ''}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.currentTarget.blur()
+            }
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              if (commentTrackIdx === i && commentText.trim()) {
+                handleComment()
+              }
+            }
+          }}
+          onFocus={() => {
+            setCommentTrackIdx(i)
+            if (skipFocusTimeRef.current) {
+              skipFocusTimeRef.current = false
+            } else {
+              setCommentTime(currentTime)
+            }
+          }}
+          onChange={(e) => {
+            setCommentTrackIdx(i)
+            setCommentText(e.target.value)
+            e.target.style.height = 'auto'
+            e.target.style.height = e.target.scrollHeight + 'px'
+          }}
+          onBlur={(e) => {
+            if (!e.target.value.trim()) {
+              setCommentTime(null)
+              e.target.style.height = ''
+            }
+          }}
+          disabled={submittingComment}
+        />
+        {commentTrackIdx === i && commentTime !== null && (
+          <span className="comment-at-badge">{formatTime(commentTime)}</span>
+        )}
+        <button
+          type="button"
+          className="btn-comment"
+          onClick={() => { setCommentTrackIdx(i); handleComment() }}
+          disabled={!(commentTrackIdx === i && commentText.trim()) || submittingComment}
+        >
+          {submittingComment && commentTrackIdx === i ? 'Posting…' : 'Post'}
+        </button>
+      </div>
+    )
+  }
+
   function handlePlayPause() {
     if (isPlaying) {
       pause()
@@ -275,7 +372,10 @@ export default function Listener() {
     if (!isAuth) {
       await sdk.oauth.login({ scope: 'write' })
     }
-    return sdk.oauth.getUser()
+    const user = await sdk.oauth.getUser()
+    if (user?.id) setCurrentUserId(user.id)
+    if (user?.handle) setCurrentUserHandle(user.handle)
+    return user
   }
 
   async function handleFavorite(trackId: string) {
@@ -308,11 +408,12 @@ export default function Listener() {
           entityType: 'Track' as const,
           entityId: numericId,
           body: commentText.trim(),
-          trackTimestampS: Math.floor(currentTime),
+          trackTimestampS: Math.floor(commentTime ?? currentTime),
         },
       })
 
       setCommentText('')
+      setCommentTime(null)
       // Invalidate comments cache to refetch
       await queryClient.invalidateQueries({ queryKey: ['comments', trackId] })
     } catch (err) {
@@ -347,128 +448,224 @@ export default function Listener() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Audius AB</h1>
-      </div>
-
-      {description && <p className="listener-question">{description}</p>}
-
-      {!isReady && (
-        <p className="loading-msg">Fetching and decoding audio…</p>
-      )}
-
-      {/* Track rows */}
-      <div className="track-rows">
-        {tracks.map((track, i) => (
-          <div
-            className={`waveform-row${activeIndex === i ? ' active' : ''}`}
-            key={track.id}
-          >
-            <button
-              type="button"
-              className={`track-toggle-btn${activeIndex === i ? ' active' : ''}`}
-              onClick={() => handleToggleTrack(i)}
-              title={`Listen to ${track.title || `track ${LABELS[i]}`}`}
-            >
-              {LABELS[i]}
-            </button>
-            <div
-              ref={(el) => { containerRefs.current[i] = el }}
-              className="waveform-container"
-            >
-              {/* Comment markers */}
-              {duration > 0 &&
-                comments
-                  .filter(() => commentTrackIdx === i)
-                  .map((c) => (
-                    <div
-                      key={c.id}
-                      className="comment-marker"
-                      style={{ left: `${(c.timestampSeconds / duration) * 100}%` }}
-                      title={`${c.handle}: ${c.body}`}
-                    />
-                  ))}
-            </div>
-            <button
-              type="button"
-              className={`btn-favorite${favorited.has(track.id) ? ' favorited' : ''}`}
-              onClick={() => handleFavorite(track.id)}
-              title="Favorite this track"
-            >
-              ♥
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {/* Transport */}
-      <div className="transport">
         <button
           type="button"
-          className="btn-playpause"
+          className="btn-playpause btn-playpause-lg"
           onClick={handlePlayPause}
           disabled={!isReady}
           title={isPlaying ? 'Pause' : 'Play'}
         >
           {isPlaying ? '⏸' : '▶'}
         </button>
-        <span className="time-display">
-          {formatTime(currentTime)} / {formatTime(duration)}
-        </span>
+        <div className="header-title-group">
+          <h1>{playlistName}</h1>
+          {description && <span className="listener-question">{description}</span>}
+        </div>
+        <div className="header-actions">
+          <button type="button" className="btn-header btn-login" onClick={() => navigate('/')} title="Create new AB test">
+            + New
+          </button>
+          <button type="button" className="btn-header" onClick={() => setShowHelp(true)} title="Help">
+            ?
+          </button>
+          {currentUserHandle ? (
+            <span className="logged-in-badge">@{currentUserHandle}</span>
+          ) : (
+            <button type="button" className="btn-header btn-login" onClick={() => { ensureUser().catch((err) => console.error('Login failed:', err)) }} title="Log in with Audius">
+              Log in
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Analyzers */}
-      {isReady && (
+      {!isReady && (
+        <div className="modal-overlay">
+          <div className="modal loading-modal">
+            <div className="spinner" />
+            <p>Fetching and decoding audio…</p>
+          </div>
+        </div>
+      )}
+
+      {/* Track A Analyzers */}
+      <div className="analyzers-row">
+        <SpectrumAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} />
+        <SpaceAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} />
+        <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} />
+      </div>
+
+      {/* Waveform area */}
+      <div className="waveform-area">
+
+        <div className="waveform-area-center">
+          {/* Track rows */}
+          <div className="track-rows">
+            {tracks.map((track, i) => (
+              <div key={track.id}>
+                {/* Comment input above track A */}
+                {i === 0 && renderCommentForm(i)}
+                {i === 0 && (
+                  <div className="waveform-time-row">
+                    <span className="time-display">
+                      {formatTime(Math.min(currentTime, trackDurations[0] ?? duration))} / {formatTime(trackDurations[0] ?? duration)}
+                    </span>
+                  </div>
+                )}
+
+                <div
+                  className={`waveform-row${activeIndex === i ? ' active' : ''}`}
+                >
+                {tracks.length > 1 && (
+                  <button
+                    type="button"
+                    className={`track-toggle-btn${activeIndex === i ? ' active' : ''}`}
+                    onClick={() => handleToggleTrack(i)}
+                    title={`Listen to ${track.title || `track ${LABELS[i]}`}`}
+                  >
+                    {LABELS[i]}
+                  </button>
+                )}
+                <div
+                  ref={(el) => { containerRefs.current[i] = el }}
+                  className="waveform-container"
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const progress = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                    if (clickTimerRef.current) clearTimeout(clickTimerRef.current)
+                    clickTimerRef.current = setTimeout(() => {
+                      clickTimerRef.current = null
+                      handleToggleTrack(i)
+                      if (duration > 0) seek(progress)
+                    }, 250)
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation()
+                    if (clickTimerRef.current) {
+                      clearTimeout(clickTimerRef.current)
+                      clickTimerRef.current = null
+                    }
+                    handleToggleTrack(i)
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const progress = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                    setCommentTime(progress * duration)
+                    skipFocusTimeRef.current = true
+                    commentTextareaRefs.current[i]?.focus()
+                  }}
+                >
+                  {/* Pending comment marker */}
+                  <div
+                    className="comment-marker pending"
+                    style={{
+                      left: duration > 0 && commentTime !== null ? `${(commentTime / duration) * 100}%` : '0%',
+                      display: commentTime !== null && commentTrackIdx === i ? undefined : 'none',
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className={`btn-favorite${favorited.has(track.id) ? ' favorited' : ''}`}
+                  onClick={() => handleFavorite(track.id)}
+                  title="Favorite this track"
+                >
+                  ♥
+                </button>
+              </div>
+
+                {/* Time display below track B */}
+                {i === 1 && trackDurations.length > 1 && (
+                  <div className="waveform-time-row">
+                    <span className="time-display">
+                      {formatTime(Math.min(currentTime, trackDurations[1]))} / {formatTime(trackDurations[1])}
+                    </span>
+                  </div>
+                )}
+                {/* Comment input below track B */}
+                {i === 1 && renderCommentForm(i)}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Track B Analyzers */}
+      {tracks.length > 1 && (
         <div className="analyzers-row">
-          <SpectrumAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} />
-          <SpaceAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} />
-          <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} />
+          <SpectrumAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} />
+          <SpaceAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} />
+          <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} />
         </div>
       )}
 
       {/* Comments */}
       <div className="comments-section">
-        <h3>Comments — Track {LABELS[commentTrackIdx] ?? commentTrackIdx + 1}</h3>
+        <div className="comments-columns">
+          {tracks.map((track, i) => {
+            const comments = allComments[i] ?? []
+            return (
+              <div className="comments-column" key={track.id}>
+                {tracks.length > 1 && <h3>Track {LABELS[i]}</h3>}
 
-        <div className="comment-form">
-          <textarea
-            placeholder={`Comment at ${formatTime(currentTime)}… (requires Audius login)`}
-            value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
-            disabled={submittingComment}
-          />
-          <button
-            type="button"
-            className="btn-comment"
-            onClick={handleComment}
-            disabled={!commentText.trim() || submittingComment}
-          >
-            {submittingComment ? 'Posting…' : 'Post'}
-          </button>
-        </div>
-
-        <div className="comment-list">
-          {comments.length === 0 && (
-            <p className="empty-comments">No comments yet.</p>
-          )}
-          {comments.map((c) => (
-            <div className="comment-item" key={c.id}>
-              <div className="comment-meta">
-                <span className="comment-timestamp" role="button" onClick={() => {
-                  if (duration > 0) {
-                    seek(c.timestampSeconds / duration)
-                    if (!isPlaying) {
-                      play()
-                      setIsPlaying(true)
-                    }
-                  }
-                }}>{formatTime(c.timestampSeconds)}</span>
-                <span className="comment-author">@{c.handle}</span>
+                <div className="comment-list">
+                  {comments.length === 0 && (
+                    <p className="empty-comments">No comments yet.</p>
+                  )}
+                  {comments.map((c) => (
+                    <div className="comment-item" key={c.id}>
+                      <div className="comment-meta">
+                        <span className="comment-timestamp" role="button" onClick={() => {
+                          if (duration > 0) {
+                            seek(c.timestampSeconds / duration)
+                            if (!isPlaying) {
+                              play()
+                              setIsPlaying(true)
+                            }
+                          }
+                        }}>{formatTime(c.timestampSeconds)}</span>
+                        <span className="comment-author">@{c.handle}</span>
+                      </div>
+                      <div className="comment-body">{c.body}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="comment-body">{c.body}</div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
+
+      {/* Help modal */}
+      {showHelp && (
+        <div className="modal-overlay" onClick={() => setShowHelp(false)} onKeyDown={(e) => { if (e.key === 'Escape') setShowHelp(false) }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" onClick={() => setShowHelp(false)}>✕</button>
+            <h2>Audius AB</h2>
+            <p>Compare two tracks side-by-side. Listen, analyze, and leave timestamped comments.</p>
+
+            <h3>How to use</h3>
+            <ul>
+              <li>Press play or hit <kbd>Space</kbd> to start playback</li>
+              <li>Click a waveform to seek; click the other track's waveform to switch</li>
+              <li>Double-click a waveform to set a comment timestamp and focus the input</li>
+              <li>Use the analyzers (spectrum, stereo field, loudness) to compare tracks</li>
+              <li>Log in with Audius to leave comments and favorite tracks</li>
+            </ul>
+
+            <h3>Hotkeys</h3>
+            <table className="hotkeys-table">
+              <tbody>
+                <tr><td><kbd>Space</kbd></td><td>Play / Pause</td></tr>
+                <tr><td><kbd>1</kbd> / <kbd>2</kbd></td><td>Switch to track A / B</td></tr>
+                <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Switch track</td></tr>
+                <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Seek ±5s (hold to fast-seek)</td></tr>
+                <tr><td><kbd>C</kbd></td><td>Focus comment input at current time</td></tr>
+                <tr><td><kbd>Enter</kbd></td><td>Submit comment</td></tr>
+                <tr><td><kbd>Shift+Enter</kbd></td><td>New line in comment</td></tr>
+                <tr><td><kbd>Escape</kbd></td><td>Unfocus comment input</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

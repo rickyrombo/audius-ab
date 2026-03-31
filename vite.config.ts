@@ -14,13 +14,5 @@ export default defineConfig({
       protocolImports: true,
     }),
   ],
-  server: {
-    proxy: {
-      "/api/phoenix": {
-        target: "https://api.phoenix.rickyrombo.com",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/phoenix/, ""),
-      },
-    },
-  },
+  server: {},
 });

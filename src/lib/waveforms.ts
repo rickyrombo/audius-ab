@@ -19,9 +19,38 @@ export class SyncedWaveforms {
   private timeUpdateCb: TimeUpdateCallback | null = null;
   private destroyed = false;
 
+  // Analysis nodes
+  private analyserNode: AnalyserNode;
+  private analyserL: AnalyserNode;
+  private analyserR: AnalyserNode;
+  private splitter: ChannelSplitterNode;
+  private mergerToDestination: ChannelMergerNode;
+
   constructor(containers: HTMLElement[]) {
     this.containers = containers;
     this.audioCtx = new AudioContext();
+
+    // Main analyser on the summed output
+    this.analyserNode = this.audioCtx.createAnalyser();
+    this.analyserNode.fftSize = 2048;
+    this.analyserNode.smoothingTimeConstant = 0.8;
+
+    // Stereo split for L/R analysis (panning/width)
+    this.splitter = this.audioCtx.createChannelSplitter(2);
+    this.mergerToDestination = this.audioCtx.createChannelMerger(2);
+
+    this.analyserL = this.audioCtx.createAnalyser();
+    this.analyserL.fftSize = 256;
+    this.analyserR = this.audioCtx.createAnalyser();
+    this.analyserR.fftSize = 256;
+
+    // analyserNode -> splitter -> L/R analysers -> merger -> destination
+    this.analyserNode.connect(this.splitter);
+    this.splitter.connect(this.analyserL, 0);
+    this.splitter.connect(this.analyserR, 1);
+    this.analyserL.connect(this.mergerToDestination, 0, 0);
+    this.analyserR.connect(this.mergerToDestination, 0, 1);
+    this.mergerToDestination.connect(this.audioCtx.destination);
   }
 
   async load(streamUrls: string[], preloadedPeaks?: number[][]): Promise<void> {
@@ -40,11 +69,11 @@ export class SyncedWaveforms {
 
     this.audioBuffers = buffers;
 
-    // Create gain nodes
+    // Create gain nodes — route through analyser instead of directly to destination
     this.gainNodes = buffers.map((_, i) => {
       const gain = this.audioCtx.createGain();
       gain.gain.value = i === this.activeIndex ? 1 : 0;
-      gain.connect(this.audioCtx.destination);
+      gain.connect(this.analyserNode);
       return gain;
     });
 
@@ -155,6 +184,22 @@ export class SyncedWaveforms {
   getDuration(): number {
     if (!this.audioBuffers.length) return 0;
     return Math.max(...this.audioBuffers.map((b) => b.duration));
+  }
+
+  getAnalyser(): AnalyserNode {
+    return this.analyserNode;
+  }
+
+  getAnalyserL(): AnalyserNode {
+    return this.analyserL;
+  }
+
+  getAnalyserR(): AnalyserNode {
+    return this.analyserR;
+  }
+
+  getSampleRate(): number {
+    return this.audioCtx.sampleRate;
   }
 
   onReady(cb: ReadyCallback): void {

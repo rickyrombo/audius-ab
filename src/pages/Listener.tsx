@@ -4,6 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { decodeHashId } from '@audius/sdk'
 import { getSDK } from '../lib/audius'
 import { useSyncedWaveforms } from '../hooks/useSyncedWaveforms'
+import SpectrumAnalyzer from '../components/SpectrumAnalyzer'
+import SpaceAnalyzer from '../components/SpaceAnalyzer'
+import VolumeIndicator from '../components/VolumeIndicator'
 
 const LABELS = ['A', 'B', 'C', 'D']
 
@@ -66,7 +69,7 @@ export default function Listener() {
 
   const streamUrls = tracks.map((t) => t.streamUrl)
 
-  const { isReady, currentTime, duration, play, pause, seek, setActive } =
+  const { isReady, currentTime, duration, play, pause, seek, setActive, syncedRef } =
     useSyncedWaveforms(containerRefs, streamUrls, waveformPeaks.length === streamUrls.length ? waveformPeaks : undefined)
 
   // Load playlist + tracks on mount
@@ -412,6 +415,15 @@ export default function Listener() {
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
       </div>
+
+      {/* Analyzers */}
+      {isReady && (
+        <div className="analyzers-row">
+          <SpectrumAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} />
+          <SpaceAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} />
+          <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} />
+        </div>
+      )}
 
       {/* Comments */}
       <div className="comments-section">

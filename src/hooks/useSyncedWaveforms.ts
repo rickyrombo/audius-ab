@@ -51,5 +51,6 @@ export function useSyncedWaveforms(
     pause: () => syncedRef.current?.pause(),
     seek: (progress: number) => syncedRef.current?.seek(progress),
     setActive: (i: number) => syncedRef.current?.setActiveIndex(i),
+    syncedRef,
   };
 }

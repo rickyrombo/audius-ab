@@ -70,9 +70,9 @@ textarea {
 
 /* ── Layout ── */
 .page {
-  max-width: 700px;
+  max-width: 100%;
   margin: 0 auto;
-  padding: 40px 24px 80px;
+  padding: 40px 32px 80px;
 }
 
 .page-header {
@@ -467,4 +467,83 @@ textarea {
   opacity: 0.6;
   pointer-events: none;
   transform: translateX(-50%);
+}
+
+/* ── Analyzers ── */
+.analyzers-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.analyzer-panel {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.analyzer-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.analyzer-canvas {
+  width: 100%;
+  background: var(--bg);
+  border-radius: 3px;
+}
+
+.spectrum-canvas {
+  height: 160px;
+}
+
+.space-canvas {
+  height: 260px;
+}
+
+.volume-canvas {
+  height: 220px;
+}
+
+.analyzer-panel-wide {
+  flex: 2;
+}
+
+.loudness-metric-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.loudness-metric-tab {
+  background: var(--surface2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.loudness-metric-tab:hover:not(.active) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+.loudness-metric-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }

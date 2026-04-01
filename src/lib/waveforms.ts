@@ -315,6 +315,8 @@ export class SyncedWaveforms {
   private _createAndStartSources(offset: number): void {
     const startAt = this.audioCtx.currentTime;
     this.startContextTime = startAt;
+    let endedCount = 0;
+    const totalSources = this.audioBuffers.length;
     this.sources = this.audioBuffers.map((buf, i) => {
       const src = this.audioCtx.createBufferSource();
       src.buffer = buf;
@@ -325,8 +327,9 @@ export class SyncedWaveforms {
       }
       src.start(startAt, offset);
       src.onended = () => {
-        if (this.isPlaying && i === 0) {
-          // All done — stop at end
+        endedCount++;
+        if (this.isPlaying && endedCount >= totalSources) {
+          // All sources finished — stop at end
           this.startOffset = this.getDuration();
           this.isPlaying = false;
           this._stopRaf();

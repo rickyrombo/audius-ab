@@ -614,6 +614,8 @@ export default function Listener() {
                       <div className="comment-meta">
                         <span className="comment-timestamp" role="button" onClick={() => {
                           if (duration > 0) {
+                            setActive(i)
+                            setActiveIndex(i)
                             seek(c.timestampSeconds / duration)
                             if (!isPlaying) {
                               play()

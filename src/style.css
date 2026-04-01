@@ -131,6 +131,8 @@ textarea {
 
 .creator-header p {
   font-size: 16px;
+  text-align: left;
+  margin: 4px 0;
 }
 
 .creator-slots {
@@ -751,6 +753,10 @@ kbd {
   background: rgba(204, 0, 0, 0.1);
   padding: 1px 6px;
   border-radius: 3px;
+  cursor: pointer;
+}
+.comment-timestamp:hover {
+  background: rgba(204, 0, 0, 0.2);
 }
 
 .comment-author {

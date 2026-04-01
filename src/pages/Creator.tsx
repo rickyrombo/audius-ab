@@ -95,7 +95,7 @@ export default function Creator() {
       const now = Math.floor(Date.now() / 1000)
       const titles = filled.map((s) => s.title)
       const defaultName = titles.length >= 2
-        ? `AB Test: ${titles[0]} vs ${titles[1]}`
+        ? `A/B Test: ${titles[0]} vs ${titles[1]}`
         : `Feedback Request: ${titles[0]}`
       const result = await sdk.playlists.createPlaylist({
         userId: user.id,
@@ -163,8 +163,10 @@ export default function Creator() {
   return (
     <div className="page creator-page">
       <div className="page-header creator-header">
-        <h1>Audius AB</h1>
-        <p>Upload 1–2 tracks and get feedback on your mix.</p>
+        <h1>Audius A/B</h1>
+        <p>Upload 1–2 tracks and get a private link you can share that makes it easy for listeners to give feedback and compare your tracks.</p>
+        <p>Ideal for A/B testing two versions of a track. Use it to get feedback on two different masters, a change in the mix, or a tweak of an element of your track.</p>
+        <p>Examples: <a href="/listen/EJmKJXo" target="_blank" rel="noopener noreferrer">Single Track Feedback</a> | <a href="/listen/qz2gQwo" target="_blank" rel="noopener noreferrer">A/B Test</a></p>
       </div>
 
       <div className="creator-slots">

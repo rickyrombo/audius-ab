@@ -49,9 +49,8 @@ export default function SpectrumAnalyzer({ syncedRef, isPlaying, trackIndex }: P
     const dataArr = new Float32Array(bufLen)
     const binHz = sampleRate / analyser.fftSize
 
-    // Smoothed dB values per bin — seed from current data to avoid slow ramp-up
-    const smoothed = new Float32Array(bufLen)
-    analyser.getFloatFrequencyData(smoothed)
+    // Smoothed dB values per bin — initialize to floor
+    const smoothed = new Float32Array(bufLen).fill(DB_MIN)
 
     function draw() {
       const w = cssW
@@ -97,7 +96,7 @@ export default function SpectrumAnalyzer({ syncedRef, isPlaying, trackIndex }: P
         const freq = bin * binHz
         if (freq < FREQ_MIN || freq > FREQ_MAX) continue
 
-        const rawDb = dataArr[bin]
+        const rawDb = isFinite(dataArr[bin]) ? dataArr[bin] : DB_MIN
         smoothed[bin] += (rawDb - smoothed[bin]) * 0.4
 
         const x = freqToX(freq, w)

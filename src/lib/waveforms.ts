@@ -141,7 +141,7 @@ export class SyncedWaveforms {
         progressColor: "#cc0000",
         cursorColor: "#cc0000",
         cursorWidth: 2,
-        height: 120,
+        height: "auto",
         barWidth: 1,
         barGap: 1,
         barRadius: 1,

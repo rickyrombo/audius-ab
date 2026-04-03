@@ -446,7 +446,8 @@ export default function Listener() {
   }
 
   return (
-    <div className="page">
+    <div className="page listener-page">
+      <div className="listener-above-fold">
       <div className="page-header">
         <button
           type="button"
@@ -595,6 +596,8 @@ export default function Listener() {
           <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} />
         </div>
       )}
+
+      </div>{/* end listener-above-fold */}
 
       {/* Comments */}
       <div className="comments-section">

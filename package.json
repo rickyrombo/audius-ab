@@ -16,6 +16,9 @@
     "react-router-dom": "^6.26.2",
     "wavesurfer.js": "^7.8.7"
   },
+  "overrides": {
+    "axios": "1.14.0"
+  },
   "devDependencies": {
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",

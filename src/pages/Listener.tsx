@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { getSDK } from "../lib/audius";
 import { useSyncedWaveforms } from "../hooks/useSyncedWaveforms";
 import { useAuth } from "../hooks/useAuth";
 import { useComments } from "../hooks/useComments";
@@ -10,6 +9,8 @@ import { useEditComment } from "../hooks/useEditComment";
 import { useTracks } from "../hooks/useTracks";
 import { useFavoriteTrack } from "../hooks/useFavoriteTrack";
 import { useUnfavoriteTrack } from "../hooks/useUnfavoriteTrack";
+import { usePlaylistTracks } from "../hooks/usePlaylistTracks";
+import { getStreamUrls } from "../lib/streamUrl";
 import SpectrumAnalyzer from "../components/SpectrumAnalyzer";
 import SpaceAnalyzer from "../components/SpaceAnalyzer";
 import VolumeIndicator from "../components/VolumeIndicator";
@@ -45,30 +46,30 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-interface TrackInfo {
-  id: string;
-  userId: string;
-  title: string;
-  artist: string;
-  streamUrl: string;
-}
-
 
 export default function Listener() {
   const { playlistId } = useParams<{ playlistId: string }>();
   const navigate = useNavigate();
 
 
-  const [description, setDescription] = useState("");
-  const [playlistName, setPlaylistName] = useState("Audius AB");
-  const [tracks, setTracks] = useState<TrackInfo[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const { data: playlist, error: queryError } = usePlaylistTracks(playlistId);
+  const tracks = playlist?.tracks ?? [];
+  const playlistName = playlist?.playlistName || (
+    tracks.length >= 2
+      ? `Audius AB: ${tracks[0].title} vs ${tracks[1].title}`
+      : tracks.length === 1
+        ? `Audius AB: ${tracks[0].title}`
+        : "Audius AB"
+  );
+  const description = (playlist?.description ?? "").replace(/Made with Audius A\/B/g, "").trim();
+  const ownerId = playlist?.user?.id ?? null;
+  const loadError = queryError?.message ?? null;
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [commentTrackIdx, setCommentTrackIdx] = useState(0);
   const [commentTime, setCommentTime] = useState<number | null>(null);
-  const [ownerId, setOwnerId] = useState<string | null>(null);
+
   const [showHelp, setShowHelp] = useState(() => !localStorage.getItem('helpDismissed:analyze'));
   const dismissHelp = () => { localStorage.setItem('helpDismissed:analyze', '1'); setShowHelp(false); };
   const [showOverlay, setShowOverlay] = useState(false);
@@ -121,7 +122,7 @@ export default function Listener() {
     }
   }
 
-  const streamUrls = tracks.map((t) => t.streamUrl);
+  const streamUrlSets = tracks.map((t) => getStreamUrls(t.stream));
 
   const {
     isReady,
@@ -137,7 +138,7 @@ export default function Listener() {
     setActive,
     syncedRef,
   } = useSyncedWaveforms(
-    streamUrls,
+    streamUrlSets,
     trackIds,
     (time) => {
       setCommentTime(time);
@@ -156,71 +157,6 @@ export default function Listener() {
     const timer = setTimeout(() => setShowLoading(true), 1000);
     return () => clearTimeout(timer);
   }, [tracks.length, isReady]);
-
-  // Load playlist + tracks on mount
-  useEffect(() => {
-    if (!playlistId) return;
-
-    const sdk = getSDK();
-    let cancelled = false;
-
-    async function load() {
-      try {
-        // Fetch playlist metadata
-        const playlistResp = await sdk.playlists.getPlaylist({
-          playlistId: playlistId!,
-        });
-        const playlist = playlistResp.data?.[0];
-        if (!playlist) throw new Error("Playlist not found");
-        if (cancelled) return;
-
-        setDescription((playlist.description ?? "").replace(/Made with Audius A\/B/g, "").trim());
-        if (playlist.user?.id) setOwnerId(playlist.user.id);
-
-        // Get track IDs from playlist_contents
-        const trackIds: string[] = playlist.playlistContents
-          .map((c) => c.trackId)
-          .filter(Boolean);
-        if (!trackIds.length) throw new Error("No tracks in playlist");
-        if (cancelled) return;
-
-        // Fetch tracks in bulk
-        const bulkResp = await sdk.tracks.getBulkTracks({ id: trackIds });
-        const bulkTracks = bulkResp.data ?? [];
-        const trackInfos: TrackInfo[] = trackIds
-          .map((id) => {
-            const t = bulkTracks.find((bt) => bt.id === id);
-            if (!t) return null;
-            return {
-              id: t.id,
-              userId: t.user?.id ?? "",
-              title: t.title,
-              artist: t.user?.name || t.user?.handle || "",
-              streamUrl: t.stream?.url ?? t.stream?.mirrors?.[0] ?? "",
-            };
-          })
-          .filter((t): t is TrackInfo => t !== null);
-
-        const fallbackName =
-          trackInfos.length >= 2
-            ? `Audius AB: ${trackInfos[0].title} vs ${trackInfos[1].title}`
-            : `Audius AB: ${trackInfos[0].title}`;
-        setPlaylistName(playlist.playlistName || fallbackName);
-
-        if (!cancelled) {
-          setTracks(trackInfos);
-        }
-      } catch (err) {
-        if (!cancelled)
-          setLoadError(err instanceof Error ? err.message : "Failed to load");
-      }
-    }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [playlistId]);
 
   // Check if user is already logged in (don't force login)
   useEffect(() => {

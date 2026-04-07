@@ -1,17 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { getSDK } from "../lib/audius";
 import { useSyncedWaveforms } from "../hooks/useSyncedWaveforms";
+import { usePlaylistTracks } from "../hooks/usePlaylistTracks";
+import { getStreamUrls } from "../lib/streamUrl";
+import type { Track } from "@audius/sdk";
 import { useAuth } from "../hooks/useAuth";
 import { useBlindSubmit } from "../hooks/useBlindSubmit";
 import { useBackgroundVisualizer } from "../contexts/BackgroundVisualizerContext";
-
-interface TrackInfo {
-  id: string;
-  title: string;
-  artist: string;
-  streamUrl: string;
-}
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -23,10 +18,10 @@ export default function BlindListener() {
   const { playlistId } = useParams<{ playlistId: string }>();
   const navigate = useNavigate();
 
-  const [tracks, setTracks] = useState<TrackInfo[]>([]);
-  const [, setPlaylistName] = useState("");
-  const [description, setDescription] = useState("");
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const { data: playlist, error: queryError } = usePlaylistTracks(playlistId);
+  const tracks = playlist?.tracks ?? [];
+  const description = (playlist?.description ?? "").replace(/Made with Audius A\/B/g, "").trim();
+  const loadError = queryError?.message ?? null;
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -34,7 +29,7 @@ export default function BlindListener() {
   const [reasonText, setReasonText] = useState("");
   const [showHelp, setShowHelp] = useState(() => !localStorage.getItem('helpDismissed:blind'));
   const dismissHelp = () => { localStorage.setItem('helpDismissed:blind', '1'); setShowHelp(false); };
-  const [ownerName, setOwnerName] = useState<string | null>(null);
+  const ownerName = playlist?.user?.name || playlist?.user?.handle || null;
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [showLoading, setShowLoading] = useState(false);
 
@@ -45,11 +40,11 @@ export default function BlindListener() {
     Math.random() < 0.5 ? [0, 1] : [1, 0]
   );
 
-  const streamUrls = useMemo(
+  const streamUrlSets = useMemo(
     () =>
       tracks.length === 2
-        ? [tracks[shuffleMap[0]].streamUrl, tracks[shuffleMap[1]].streamUrl]
-        : tracks.map((t) => t.streamUrl),
+        ? [tracks[shuffleMap[0]], tracks[shuffleMap[1]]].map((t) => getStreamUrls(t.stream))
+        : tracks.map((t) => getStreamUrls(t.stream)),
     [tracks, shuffleMap]
   );
   const trackIds = useMemo(
@@ -70,7 +65,7 @@ export default function BlindListener() {
     seek,
     setActive,
     syncedRef,
-  } = useSyncedWaveforms(streamUrls, trackIds, undefined, () => {
+  } = useSyncedWaveforms(streamUrlSets, trackIds, undefined, () => {
     setIsPlaying(false);
   });
 
@@ -83,60 +78,6 @@ export default function BlindListener() {
     const timer = setTimeout(() => setShowLoading(true), 1000);
     return () => clearTimeout(timer);
   }, [tracks.length, isReady]);
-
-  // Load playlist
-  useEffect(() => {
-    if (!playlistId) return;
-    const sdk = getSDK();
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const playlistResp = await sdk.playlists.getPlaylist({
-          playlistId: playlistId!,
-        });
-        const playlist = playlistResp.data?.[0];
-        if (!playlist) throw new Error("Playlist not found");
-        if (cancelled) return;
-
-        setDescription((playlist.description ?? "").replace(/Made with Audius A\/B/g, "").trim());
-        if (playlist.user) {
-          setOwnerName(playlist.user.name || playlist.user.handle || null);
-        }
-
-        const ids: string[] = playlist.playlistContents
-          .map((c) => c.trackId)
-          .filter(Boolean);
-        if (!ids.length) throw new Error("No tracks in playlist");
-        if (cancelled) return;
-
-        const bulkResp = await sdk.tracks.getBulkTracks({ id: ids });
-        const bulkTracks = bulkResp.data ?? [];
-        const trackInfos: TrackInfo[] = ids
-          .map((id) => {
-            const t = bulkTracks.find((bt) => bt.id === id);
-            if (!t) return null;
-            return {
-              id: t.id,
-              title: t.title,
-              artist: t.user?.name || t.user?.handle || "",
-              streamUrl: t.stream?.url ?? t.stream?.mirrors?.[0] ?? "",
-            };
-          })
-          .filter((t): t is TrackInfo => t !== null);
-
-        setPlaylistName(playlist.playlistName || "Blind Test");
-        if (!cancelled) setTracks(trackInfos);
-      } catch (err) {
-        if (!cancelled)
-          setLoadError(err instanceof Error ? err.message : "Failed to load");
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [playlistId]);
 
   // Check auth on mount
   useEffect(() => {
@@ -362,7 +303,7 @@ export default function BlindListener() {
   }
 
   // Map blind label back to real track
-  function realTrack(blindIdx: number): TrackInfo | null {
+  function realTrack(blindIdx: number): Track | null {
     if (tracks.length < 2) return null;
     return tracks[shuffleMap[blindIdx]];
   }
@@ -627,7 +568,7 @@ export default function BlindListener() {
                 <div className="blind-reveal-label">A was:</div>
                 <div className="blind-reveal-title">{realTrack(0)?.title}</div>
                 <div className="blind-reveal-artist">
-                  {realTrack(0)?.artist}
+                  {realTrack(0)?.user?.name || realTrack(0)?.user?.handle}
                 </div>
               </div>
               <div
@@ -638,7 +579,7 @@ export default function BlindListener() {
                 <div className="blind-reveal-label">B was:</div>
                 <div className="blind-reveal-title">{realTrack(1)?.title}</div>
                 <div className="blind-reveal-artist">
-                  {realTrack(1)?.artist}
+                  {realTrack(1)?.user?.name || realTrack(1)?.user?.handle}
                 </div>
               </div>
             </div>

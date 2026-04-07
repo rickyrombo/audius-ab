@@ -1,5 +1,6 @@
 import { analyzeWaveformColors, analyzeLoudness, detectBPM, type WaveformColorData, type LoudnessStats } from "./waveformAnalysis";
 import { getCachedAudio, setCachedAudio, getCachedWaveform, setCachedWaveform } from "./audioCache";
+import { fetchWithMirrors } from "./streamUrl";
 
 type ReadyCallback = () => void;
 type TimeUpdateCallback = (time: number, duration: number) => void;
@@ -73,16 +74,16 @@ export class SyncedWaveforms {
     this.silentGain.connect(this.audioCtx.destination);
   }
 
-  async load(streamUrls: string[], trackIds: string[]): Promise<void> {
+  async load(streamUrlSets: string[][], trackIds: string[]): Promise<void> {
     if (this.destroyed) return;
 
     // Fetch + decode all tracks in parallel (with cache by track ID)
     const buffers = await Promise.all(
-      streamUrls.map(async (url, i) => {
+      streamUrlSets.map(async (urls, i) => {
         const cacheKey = trackIds[i];
         let ab = await getCachedAudio(cacheKey);
         if (!ab) {
-          const resp = await fetch(url);
+          const resp = await fetchWithMirrors(urls);
           ab = await resp.arrayBuffer();
           setCachedAudio(cacheKey, ab.slice(0));
         }

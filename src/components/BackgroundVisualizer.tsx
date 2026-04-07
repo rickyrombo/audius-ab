@@ -75,17 +75,17 @@ export default function BackgroundVisualizer() {
       const b = brightness
 
       const g1 = ctx!.createRadialGradient(cx1, cy1, 0, cx1, cy1, maxDim * 0.8)
-      g1.addColorStop(0, `rgba(70, 25, 95, ${0.05 + b * 0.13})`)
-      g1.addColorStop(0.4, `rgba(50, 20, 75, ${0.03 + b * 0.07})`)
-      g1.addColorStop(0.7, `rgba(25, 15, 50, ${0.01 + b * 0.03})`)
+      g1.addColorStop(0, `rgba(95, 20, 15, ${0.05 + b * 0.13})`)
+      g1.addColorStop(0.4, `rgba(75, 15, 10, ${0.03 + b * 0.07})`)
+      g1.addColorStop(0.7, `rgba(50, 10, 8, ${0.01 + b * 0.03})`)
       g1.addColorStop(1, 'rgba(0, 0, 0, 0)')
       ctx!.fillStyle = g1
       ctx!.fillRect(0, 0, w, h)
 
       const g2 = ctx!.createRadialGradient(cx2, cy2, 0, cx2, cy2, maxDim * 0.7)
-      g2.addColorStop(0, `rgba(25, 45, 100, ${0.04 + b * 0.10})`)
-      g2.addColorStop(0.4, `rgba(20, 35, 80, ${0.02 + b * 0.05})`)
-      g2.addColorStop(0.7, `rgba(10, 20, 50, ${0.01 + b * 0.02})`)
+      g2.addColorStop(0, `rgba(100, 30, 15, ${0.04 + b * 0.10})`)
+      g2.addColorStop(0.4, `rgba(80, 20, 10, ${0.02 + b * 0.05})`)
+      g2.addColorStop(0.7, `rgba(50, 12, 8, ${0.01 + b * 0.02})`)
       g2.addColorStop(1, 'rgba(0, 0, 0, 0)')
       ctx!.fillStyle = g2
       ctx!.fillRect(0, 0, w, h)
@@ -104,7 +104,7 @@ export default function BackgroundVisualizer() {
 
         ctx!.beginPath()
         ctx!.arc(p.x, p.y, p.radius * radiusMul, 0, Math.PI * 2)
-        ctx!.fillStyle = `rgba(180, 160, 220, ${Math.min(1, p.baseAlpha * alphaMul)})`
+        ctx!.fillStyle = `rgba(220, 140, 120, ${Math.min(1, p.baseAlpha * alphaMul)})`
         ctx!.fill()
       }
 
@@ -119,7 +119,7 @@ export default function BackgroundVisualizer() {
             ctx!.beginPath()
             ctx!.moveTo(particles[i].x, particles[i].y)
             ctx!.lineTo(particles[j].x, particles[j].y)
-            ctx!.strokeStyle = `rgba(140, 130, 180, ${(1 - dist / connectDist) * (0.08 + pulse * 0.04)})`
+            ctx!.strokeStyle = `rgba(180, 120, 100, ${(1 - dist / connectDist) * (0.08 + pulse * 0.04)})`
             ctx!.lineWidth = 0.5 + pulse * 0.3
             ctx!.stroke()
           }

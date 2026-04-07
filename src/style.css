@@ -1342,13 +1342,18 @@ kbd {
   align-items: center;
   gap: 12px;
 }
+.blind-play-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .blind-play {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  border: 2px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
+  border: 2px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
   font-size: 22px;
   display: flex;
   align-items: center;
@@ -1356,8 +1361,21 @@ kbd {
   transition: all 0.15s;
 }
 .blind-play:hover:not(:disabled) {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+}
+.blind-seek-btn {
+  width: 40px;
+  height: 40px;
+  font-size: 16px;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  color: var(--text-muted);
+}
+.blind-seek-btn:hover:not(:disabled) {
   border-color: var(--text-muted);
   background: var(--surface2);
+  color: var(--text);
 }
 .blind-seek-row {
   width: 100%;

@@ -495,14 +495,42 @@ export default function BlindListener() {
 
         {/* Transport controls */}
         <div className="blind-transport">
-          <button
-            type="button"
-            className="btn-playpause blind-play"
-            onClick={handlePlayPause}
-            disabled={!isReady}
-          >
-            {isPlaying ? "⏸" : "▶"}
-          </button>
+          <div className="blind-play-row">
+            <button
+              type="button"
+              className="btn-playpause blind-seek-btn"
+              onClick={() => {
+                if (duration <= 0) return;
+                const cur = syncedRef.current?.getCurrentTime() ?? currentTime;
+                seek(Math.max(0, cur - 10) / duration);
+              }}
+              disabled={!isReady}
+              title="Back 10s"
+            >
+              ↺
+            </button>
+            <button
+              type="button"
+              className="btn-playpause blind-play"
+              onClick={handlePlayPause}
+              disabled={!isReady}
+            >
+              {isPlaying ? "⏸" : "▶"}
+            </button>
+            <button
+              type="button"
+              className="btn-playpause blind-seek-btn"
+              onClick={() => {
+                if (duration <= 0) return;
+                const cur = syncedRef.current?.getCurrentTime() ?? currentTime;
+                seek(Math.min(duration, cur + 10) / duration);
+              }}
+              disabled={!isReady}
+              title="Forward 10s"
+            >
+              ↻
+            </button>
+          </div>
           <div className="blind-seek-row">
             <span className="blind-time">{formatTime(currentTime)}</span>
             <div

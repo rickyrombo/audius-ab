@@ -109,6 +109,15 @@ textarea {
   margin-bottom: 0;
   flex-shrink: 0;
   grid-row: header;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.header-playback-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .page-header h1 {
@@ -418,6 +427,11 @@ textarea {
   flex-shrink: 0;
 }
 
+.listener-page .header-actions {
+  align-self: flex-end;
+  margin-left: 0;
+}
+
 .btn-header {
   width: 32px;
   height: 32px;
@@ -469,31 +483,6 @@ textarea {
 }
 
 /* ── Modal ── */
-.mobile-redirect-toast {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2000;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 20px;
-  max-width: 400px;
-  width: calc(100% - 32px);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
-}
-.mobile-redirect-toast p {
-  margin: 0 0 12px;
-  font-size: 14px;
-  color: var(--text);
-  line-height: 1.4;
-}
-.mobile-redirect-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
 
 .modal-overlay {
   position: fixed;
@@ -765,6 +754,10 @@ kbd {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.mobile-zoomed-waveforms {
+  display: none;
 }
 
 .waveform-zoomed-side {
@@ -1565,4 +1558,129 @@ kbd {
 .blind-login-actions .btn-secondary {
   color: var(--text-muted);
   font-size: 13px;
+}
+
+/* ── Mobile Analyzer ── */
+.mobile-analyzer {
+  display: none;
+}
+.mobile-analyzer-selectors {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.mobile-analyzer-tabs {
+  display: flex;
+  gap: 4px;
+}
+.mobile-analyzer-tab {
+  background: var(--surface2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.mobile-analyzer-tab:hover:not(.active) {
+  color: var(--text);
+}
+.mobile-analyzer-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.mobile-analyzer-tab.track-a.active {
+  background: var(--color-a, #e06030);
+  border-color: var(--color-a, #e06030);
+}
+.mobile-analyzer-tab.track-b.active {
+  background: var(--color-b, #3080e0);
+  border-color: var(--color-b, #3080e0);
+}
+.mobile-analyzer-tab.track-overlay.active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.mobile-analyzer-panel {
+  min-height: 180px;
+  display: flex;
+}
+.mobile-analyzer-panel > .analyzer-panel {
+  flex: 1;
+}
+
+/* ── Mobile Responsive ── */
+@media (max-width: 768px) {
+  .listener-above-fold {
+    grid-template-rows: [header] auto [overlay-bar] auto [mobile-analyzer] 1fr [waveforms] auto;
+    padding: 8px 12px;
+    gap: 4px;
+  }
+
+  .header-title-group h1 {
+    font-size: 14px;
+  }
+  .header-actions {
+    gap: 6px;
+  }
+  .user-handle-text {
+    display: none;
+  }
+
+  /* Hide desktop analyzer rows, show mobile */
+  .analyzers-row {
+    display: none !important;
+  }
+  .mobile-analyzer {
+    display: block;
+    grid-row: mobile-analyzer;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Hide overlay toggle (replaced by mobile track selector) */
+  .analyzer-overlay-bar {
+    display: none;
+  }
+
+  /* Waveforms: hide desktop zoomed side, show mobile stacked zoomed */
+  .waveform-zoomed-side {
+    display: none;
+  }
+  .mobile-zoomed-waveforms {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0;
+  }
+  .mobile-zoomed-track {
+    height: 60px;
+    overflow: hidden;
+  }
+  .waveform-row {
+    padding: 4px 8px;
+    gap: 8px;
+  }
+  .waveform-container {
+    height: 32px;
+  }
+  .waveform-time-row {
+    padding: 0 9px;
+    gap: 8px;
+  }
+  .time-row-spacer-right {
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+
+  /* Comments section */
+  .comments-section {
+    padding: 12px 12px 60px;
+  }
+  .comments-columns {
+    flex-direction: column;
+  }
 }

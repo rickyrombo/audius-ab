@@ -28,6 +28,9 @@ export default function ZoomedWaveform({
   const dimTilesRef = useRef<HTMLCanvasElement[]>([])
   const tileHRef = useRef(0)
   const sizeRef = useRef({ w: 0, h: 0 })
+  // Touch/mouse drag state
+  const dragRef = useRef<{ startX: number; startTime: number; lastX: number; lastTs: number; velocity: number } | null>(null)
+  const momentumRef = useRef<{ velocity: number; raf: number } | null>(null)
 
   // Build tile canvases — uses module-level cache so tiles survive unmount/remount
   const buildTiles = useCallback((pxH: number) => {
@@ -201,7 +204,86 @@ export default function ZoomedWaveform({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncedRef, colorData, trackIndex, visibleSeconds, buildTiles])
 
+  const stopMomentum = useCallback(() => {
+    if (momentumRef.current) {
+      cancelAnimationFrame(momentumRef.current.raf)
+      momentumRef.current = null
+    }
+  }, [])
+
+  const handleDragStart = useCallback((clientX: number) => {
+    const synced = syncedRef.current
+    if (!synced) return
+    stopMomentum()
+    const now = performance.now()
+    dragRef.current = { startX: clientX, startTime: synced.getCurrentTime(), lastX: clientX, lastTs: now, velocity: 0 }
+  }, [syncedRef, stopMomentum])
+
+  const handleDragMove = useCallback((clientX: number) => {
+    const drag = dragRef.current
+    const synced = syncedRef.current
+    if (!drag || !synced) return
+    const { w } = sizeRef.current
+    if (w === 0) return
+    const duration = synced.getDuration()
+    if (!duration) return
+
+    // Seek based on total drag offset
+    const dx = drag.startX - clientX
+    const dt = (dx / w) * visibleSeconds
+    const newTime = Math.max(0, Math.min(duration, drag.startTime + dt))
+    synced.seek(newTime / duration)
+
+    // Track velocity (px/ms) with smoothing
+    const now = performance.now()
+    const elapsed = now - drag.lastTs
+    if (elapsed > 0) {
+      const instantV = (drag.lastX - clientX) / elapsed // px/ms, positive = seeking forward
+      drag.velocity = drag.velocity * 0.6 + instantV * 0.4
+    }
+    drag.lastX = clientX
+    drag.lastTs = now
+  }, [syncedRef, visibleSeconds])
+
+  const handleDragEnd = useCallback(() => {
+    const drag = dragRef.current
+    const synced = syncedRef.current
+    if (!drag || !synced) { dragRef.current = null; return }
+
+    const { w } = sizeRef.current
+    const duration = synced.getDuration()
+    // Only coast if there's meaningful velocity
+    const vPxPerMs = drag.velocity
+    dragRef.current = null
+    if (!duration || w === 0 || Math.abs(vPxPerMs) < 0.05) return
+
+    // Convert px/ms velocity to seconds/ms
+    let vSecsPerMs = (vPxPerMs / w) * visibleSeconds
+    const friction = 0.88 // per-frame multiplier
+
+    const coast = () => {
+      vSecsPerMs *= friction
+      if (Math.abs(vSecsPerMs) < 0.00002) { momentumRef.current = null; return }
+      const cur = synced.getCurrentTime()
+      const dt = vSecsPerMs * 16 // ~16ms per frame
+      const next = Math.max(0, Math.min(duration, cur + dt))
+      synced.seek(next / duration)
+      momentumRef.current!.raf = requestAnimationFrame(coast)
+    }
+    momentumRef.current = { velocity: vPxPerMs, raf: requestAnimationFrame(coast) }
+  }, [syncedRef, visibleSeconds])
+
   return (
-    <canvas ref={canvasRef} className="zoomed-waveform-canvas" />
+    <canvas
+      ref={canvasRef}
+      className="zoomed-waveform-canvas"
+      onTouchStart={(e) => handleDragStart(e.touches[0].clientX)}
+      onTouchMove={(e) => handleDragMove(e.touches[0].clientX)}
+      onTouchEnd={handleDragEnd}
+      onMouseDown={(e) => { handleDragStart(e.clientX); e.preventDefault() }}
+      onMouseMove={(e) => { if (dragRef.current) handleDragMove(e.clientX) }}
+      onMouseUp={handleDragEnd}
+      onMouseLeave={handleDragEnd}
+    />
   )
 }

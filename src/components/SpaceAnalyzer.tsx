@@ -149,9 +149,9 @@ export default function SpaceAnalyzer({
       const barAreaH = 44
       const polarCenterX = w / 2
       const polarBottomY = h - barAreaH - 8
-      const polarRadiusBase = Math.min(w / 2 - 20, polarBottomY - 16)
+      const polarRadiusBase = Math.max(0, Math.min(w / 2 - 20, polarBottomY - 16))
       const polarRadius = currentMode === 'lissajous'
-        ? Math.min(w / 2 - 30, (h - barAreaH) / 2 - 20)
+        ? Math.max(0, Math.min(w / 2 - 30, (h - barAreaH) / 2 - 20))
         : polarRadiusBase
       const polarCenterY = currentMode === 'lissajous'
         ? (h - barAreaH) / 2
@@ -545,13 +545,13 @@ export default function SpaceAnalyzer({
       c.strokeStyle = 'rgba(255, 255, 255, 0.06)'
       c.lineWidth = 1
       c.beginPath()
-      c.arc(cx, cy, radius, Math.PI, 0)
+      c.arc(cx, cy, Math.max(0, radius), Math.PI, 0)
       c.stroke()
 
       for (let r = 0.25; r < 1; r += 0.25) {
         c.strokeStyle = 'rgba(255, 255, 255, 0.03)'
         c.beginPath()
-        c.arc(cx, cy, radius * r, Math.PI, 0)
+        c.arc(cx, cy, Math.max(0, radius * r), Math.PI, 0)
         c.stroke()
       }
 

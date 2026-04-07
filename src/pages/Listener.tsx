@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { getSDK } from "../lib/audius";
 import { useSyncedWaveforms } from "../hooks/useSyncedWaveforms";
 import { useAuth } from "../hooks/useAuth";
@@ -53,9 +53,55 @@ interface TrackInfo {
   streamUrl: string;
 }
 
+function isMobile() {
+  return /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+}
+
+function MobileRedirect({ onDismiss }: { onDismiss: () => void }) {
+  const { playlistId } = useParams<{ playlistId: string }>();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!playlistId) return;
+    const timer = setTimeout(() => {
+      navigate(`/blind/${playlistId}`, { replace: true });
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [playlistId, navigate]);
+
+  return (
+    <div className="mobile-redirect-toast">
+      <p>The analysis page works best on desktop. Redirecting to the listening page…</p>
+      <div className="mobile-redirect-actions">
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={onDismiss}
+        >
+          Load anyway
+        </button>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => navigate(`/blind/${playlistId}`, { replace: true })}
+        >
+          Go now
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Listener() {
   const { playlistId } = useParams<{ playlistId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [showMobileRedirect, setShowMobileRedirect] = useState(
+    () => isMobile() && !searchParams.has("desktop")
+  );
 
   const [description, setDescription] = useState("");
   const [playlistName, setPlaylistName] = useState("Audius AB");
@@ -523,6 +569,14 @@ export default function Listener() {
 
   return (
     <div className="page listener-page">
+      {showMobileRedirect && (
+        <MobileRedirect
+          onDismiss={() => {
+            setShowMobileRedirect(false);
+            setSearchParams({ desktop: "1" }, { replace: true });
+          }}
+        />
+      )}
       <div className="listener-above-fold">
         <div className="page-header">
           <button

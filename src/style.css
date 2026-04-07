@@ -436,10 +436,19 @@ textarea {
   font-size: 13px;
 }
 
-.logged-in-badge {
+.user-handle-text {
   font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
+}
+.btn-logout {
+  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.btn-logout:hover {
+  color: var(--text);
 }
 
 .listener-question {
@@ -486,6 +495,31 @@ textarea {
 .modal-close:hover {
   color: var(--text);
   background: var(--surface2);
+}
+
+.modal-narrow {
+  max-width: 400px;
+}
+.modal-sm {
+  max-width: 340px;
+  text-align: center;
+  padding: 24px;
+}
+.modal-sm p {
+  font-size: 15px;
+  margin-bottom: 16px;
+}
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.btn-danger {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-danger:hover {
+  background: var(--accent-hover);
 }
 
 .modal h2 {
@@ -578,10 +612,25 @@ kbd {
 
 .waveform-time-row {
   display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 0 15px;
+}
+.time-row-spacer-toggle {
+  width: 36px;
+  flex-shrink: 0;
+}
+.time-row-spacer-right {
+  flex: none;
+  width: calc(30% + 50px);
+  min-width: calc(120px + 50px);
+  max-width: calc(300px + 50px);
+  display: flex;
   justify-content: flex-end;
 }
 
 .waveform-time-row .time-display {
+  flex-shrink: 0;
   font-variant-numeric: tabular-nums;
   font-size: 13px;
   color: var(--text-muted);
@@ -818,10 +867,62 @@ kbd {
 }
 
 .comment-item {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 10px 14px;
+}
+.comment-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.comment-item:hover .comment-actions {
+  opacity: 1;
+}
+.btn-comment-action {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+  display: flex;
+  align-items: center;
+}
+.btn-comment-action:hover {
+  color: var(--accent);
+}
+
+.comment-edit-form {
+  margin-top: 6px;
+}
+.comment-edit-form textarea {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 48px;
+}
+.comment-edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .comment-meta {
@@ -1088,4 +1189,296 @@ kbd {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
+}
+
+/* ── Creator result link groups ── */
+.result-link-group {
+  margin-bottom: 12px;
+}
+.result-link-group:last-child {
+  margin-bottom: 0;
+}
+.result-link-group label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+/* ── Blind Test Page ── */
+.blind-page {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+}
+
+.blind-top-bar {
+  position: fixed;
+  top: 12px;
+  right: 24px;
+  z-index: 10;
+}
+
+.blind-bg-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.blind-content {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 480px;
+  padding: 40px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+}
+
+.blind-header {
+  text-align: center;
+}
+.blind-header h1 {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  margin-bottom: 8px;
+}
+.blind-question {
+  color: var(--text);
+  font-size: 16px;
+  font-style: italic;
+  margin-bottom: 4px;
+}
+.blind-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* A/B toggle buttons */
+.blind-toggle {
+  display: flex;
+  gap: 12px;
+}
+.blind-track-btn {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 24px;
+  font-weight: 800;
+  transition: all 0.15s;
+}
+.blind-track-btn:hover {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+.blind-track-btn.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 24px rgba(204, 0, 0, 0.3);
+}
+
+/* Transport */
+.blind-transport {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.blind-play {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.blind-play:hover:not(:disabled) {
+  border-color: var(--text-muted);
+  background: var(--surface2);
+}
+.blind-seek-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.blind-time {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: center;
+}
+.blind-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+.blind-progress-bar:hover {
+  height: 8px;
+}
+.blind-progress-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--text-muted);
+  border-radius: 3px;
+  transition: width 0.1s linear;
+}
+
+/* Preference buttons */
+.blind-preference {
+  text-align: center;
+}
+.blind-preference p {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.blind-preference-btns {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+.blind-pref-btn {
+  width: 100px;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  transition: all 0.15s;
+}
+.blind-pref-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface2);
+}
+
+/* Reason step */
+.blind-reason {
+  text-align: center;
+  width: 100%;
+}
+.blind-reason p {
+  margin-bottom: 10px;
+  font-size: 15px;
+}
+.blind-reason-input {
+  width: 320px;
+  min-height: 60px;
+  resize: both;
+  margin-bottom: 12px;
+}
+.blind-reason-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.blind-skip-btn {
+  width: auto;
+  padding: 10px 20px;
+  font-size: 14px;
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.blind-submit-btn {
+  width: auto;
+  padding: 10px 28px;
+  font-size: 14px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.blind-submit-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* Reveal */
+.blind-reveal {
+  text-align: center;
+  width: 100%;
+}
+.blind-reveal-header {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+.blind-reveal-grid {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.blind-reveal-card {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+}
+.blind-reveal-card.chosen {
+  border-color: var(--accent);
+  box-shadow: 0 0 16px rgba(204, 0, 0, 0.2);
+}
+.blind-reveal-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.blind-reveal-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.blind-reveal-artist {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.blind-compare-btn {
+  margin-top: 4px;
+}
+.blind-login-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+.blind-login-actions .btn-secondary {
+  color: var(--text-muted);
+  font-size: 13px;
 }

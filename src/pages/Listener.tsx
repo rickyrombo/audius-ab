@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQueries, useQueryClient } from '@tanstack/react-query'
-import { decodeHashId } from '@audius/sdk'
 import { getSDK } from '../lib/audius'
 import { useSyncedWaveforms } from '../hooks/useSyncedWaveforms'
+import { useAuth } from '../hooks/useAuth'
+import { useComments } from '../hooks/useComments'
+import { usePostComment } from '../hooks/usePostComment'
+import { useDeleteComment } from '../hooks/useDeleteComment'
+import { useEditComment } from '../hooks/useEditComment'
+import { useTracks } from '../hooks/useTracks'
+import { useFavoriteTrack } from '../hooks/useFavoriteTrack'
+import { useUnfavoriteTrack } from '../hooks/useUnfavoriteTrack'
 import SpectrumAnalyzer from '../components/SpectrumAnalyzer'
 import SpaceAnalyzer from '../components/SpaceAnalyzer'
 import VolumeIndicator from '../components/VolumeIndicator'
@@ -38,16 +44,6 @@ interface TrackInfo {
   streamUrl: string
 }
 
-interface CommentDisplay {
-  id: string
-  userId: string
-  handle: string
-  avatarUrl: string
-  avatarMirrors: string[]
-  body: string
-  timestampSeconds: number
-}
-
 export default function Listener() {
   const { playlistId } = useParams<{ playlistId: string }>()
   const navigate = useNavigate()
@@ -61,72 +57,40 @@ export default function Listener() {
   const [commentText, setCommentText] = useState('')
   const [commentTrackIdx, setCommentTrackIdx] = useState(0)
   const [commentTime, setCommentTime] = useState<number | null>(null)
-  const [favorited, setFavorited] = useState<Set<string>>(new Set())
-  const [submittingComment, setSubmittingComment] = useState(false)
   const [ownerId, setOwnerId] = useState<string | null>(null)
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-  const [currentUserHandle, setCurrentUserHandle] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [showOverlay, setShowOverlay] = useState(false)
   const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{ commentId: string; trackId: string } | null>(null)
+  const [editingComment, setEditingComment] = useState<{ id: string; trackId: string; body: string } | null>(null)
 
+  const [showLoading, setShowLoading] = useState(false)
   const commentTextareaRefs = useRef<(HTMLTextAreaElement | null)[]>([])
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const skipFocusTimeRef = useRef(false)
-  const queryClient = useQueryClient()
 
-  const commentQueries = useQueries({
-    queries: tracks.map((t) => ({
-      queryKey: ['comments', t.id],
-      queryFn: async (): Promise<CommentDisplay[]> => {
-        const sdk = getSDK()
-        const resp = await sdk.tracks.getTrackComments({ trackId: t.id })
-        const items = resp.data ?? []
-        const users = resp.related?.users ?? []
-        const userMap = new Map(users.map((u: any) => [u.id, u]))
-        return items.map((c) => {
-          const user = c.userId ? userMap.get(c.userId) : null
-          const pic = user?.profilePicture ?? user?.avatar
-          let primaryUrl = ''
-          let mirrorUrls: string[] = []
-          if (typeof pic === 'string') {
-            primaryUrl = pic
-          } else if (pic) {
-            // Keys are _150x150, _480x480, _1000x1000
-            primaryUrl = pic._150x150 ?? pic._480x480 ?? pic._1000x1000 ?? ''
-            // Mirrors are host prefixes — construct full URLs from the primary path
-            if (primaryUrl && Array.isArray(pic.mirrors)) {
-              try {
-                const path = new URL(primaryUrl).pathname
-                mirrorUrls = pic.mirrors.map((host: string) => `${host.replace(/\/$/, '')}${path}`)
-              } catch { /* ignore */ }
-            }
-          }
-          return {
-            id: c.id,
-            userId: c.userId ?? '',
-            handle: user?.handle ?? c.userId ?? 'anon',
-            avatarUrl: primaryUrl,
-            avatarMirrors: mirrorUrls,
-            body: c.message,
-            timestampSeconds: c.trackTimestampS ?? 0,
-          }
-        })
-      },
-      enabled: !!t.id,
-      staleTime: Infinity,
-    })),
-  })
-  const allComments = commentQueries.map((q) => {
-    const comments = q.data ?? []
-    if (!ownerId && !currentUserId) return comments
-    return comments.filter((c) => 
-      (ownerId && c.userId === ownerId) || (currentUserId && c.userId === currentUserId)
-    )
-  })
+  const { currentUserId, currentUserHandle, checkAuth, ensureUser, logout } = useAuth()
+  const trackIds = tracks.map((t) => t.id)
+  const allComments = useComments(trackIds, ownerId, currentUserId)
+  const postComment = usePostComment(ensureUser, currentUserId, currentUserHandle)
+  const deleteComment = useDeleteComment(ensureUser)
+  const editComment = useEditComment(ensureUser)
+  const trackQueries = useTracks(trackIds, currentUserId)
+  const favoriteTrack = useFavoriteTrack(trackIds, ensureUser, currentUserId)
+  const unfavoriteTrack = useUnfavoriteTrack(ensureUser, currentUserId)
+
+  function toggleFavorite(trackId: string) {
+    const isSaved = trackQueries[trackIds.indexOf(trackId)]?.data?.hasCurrentUserSaved
+    if (isSaved) {
+      unfavoriteTrack.mutate(trackId)
+    } else {
+      const currentFav = trackIds.find((_, i) => trackQueries[i]?.data?.hasCurrentUserSaved)
+      if (currentFav) unfavoriteTrack.mutate(currentFav)
+      favoriteTrack.mutate(trackId)
+    }
+  }
 
   const streamUrls = tracks.map((t) => t.streamUrl)
-  const trackIds = tracks.map((t) => t.id)
 
   const { isReady, currentTime, duration, trackDurations, colorData, bpms, play, pause, seek, setActive, syncedRef } =
     useSyncedWaveforms(streamUrls, trackIds, (time) => {
@@ -134,6 +98,13 @@ export default function Listener() {
     }, () => {
       setIsPlaying(false)
     })
+
+  // Delay showing loading modal by 1s
+  useEffect(() => {
+    if (tracks.length && isReady) { setShowLoading(false); return }
+    const timer = setTimeout(() => setShowLoading(true), 1000)
+    return () => clearTimeout(timer)
+  }, [tracks.length, isReady])
 
   // Load playlist + tracks on mount
   useEffect(() => {
@@ -154,9 +125,8 @@ export default function Listener() {
         if (playlist.user?.id) setOwnerId(playlist.user.id)
 
         // Get track IDs from playlist_contents
-        const contents = (playlist as any).playlistContents ?? (playlist as any).playlist_contents ?? []
-        const trackIds: string[] = contents
-          .map((c: any) => c.trackId ?? c.track_id)
+        const trackIds: string[] = playlist.playlistContents
+          .map((c) => c.trackId)
           .filter(Boolean)
         if (!trackIds.length) throw new Error('No tracks in playlist')
         if (cancelled) return
@@ -166,7 +136,7 @@ export default function Listener() {
         const bulkTracks = bulkResp.data ?? []
         const trackInfos: TrackInfo[] = trackIds
           .map((id) => {
-            const t = bulkTracks.find((bt: any) => bt.id === id)
+            const t = bulkTracks.find((bt) => bt.id === id)
             if (!t) return null
             return {
               id: t.id,
@@ -196,16 +166,8 @@ export default function Listener() {
   }, [playlistId])
 
   // Check if user is already logged in (don't force login)
-  useEffect(() => {
-    const sdk = getSDK()
-    sdk.oauth.isAuthenticated().then(async (isAuth) => {
-      if (isAuth) {
-        const user = await sdk.oauth.getUser()
-        if (user?.id) setCurrentUserId(user.id)
-        if (user?.handle) setCurrentUserHandle(user.handle)
-      }
-    }).catch(() => {})
-  }, [])
+  useEffect(() => { checkAuth() }, [checkAuth])
+
 
 
   // Refs for hotkey handlers to avoid stale closures
@@ -399,7 +361,7 @@ export default function Listener() {
               e.target.style.height = ''
             }
           }}
-          disabled={submittingComment}
+          disabled={postComment.isPending}
         />
         {commentTrackIdx === i && commentTime !== null && (
           <span className="comment-at-badge">{formatTime(commentTime)}</span>
@@ -408,9 +370,9 @@ export default function Listener() {
           type="button"
           className="btn-comment"
           onClick={() => { setCommentTrackIdx(i); handleComment() }}
-          disabled={!(commentTrackIdx === i && commentText.trim()) || submittingComment}
+          disabled={!(commentTrackIdx === i && commentText.trim()) || postComment.isPending}
         >
-          {submittingComment && commentTrackIdx === i ? 'Posting…' : 'Post'}
+          {postComment.isPending && commentTrackIdx === i ? 'Posting…' : 'Post'}
         </button>
       </div>
     )
@@ -426,18 +388,6 @@ export default function Listener() {
     }
   }
 
-  async function ensureUser() {
-    const sdk = getSDK()
-    const isAuth = await sdk.oauth.isAuthenticated()
-    if (!isAuth) {
-      await sdk.oauth.login({ scope: 'write' })
-    }
-    const user = await sdk.oauth.getUser()
-    if (user?.id) setCurrentUserId(user.id)
-    if (user?.handle) setCurrentUserHandle(user.handle)
-    return user
-  }
-
   function scrollToComment(commentId: string) {
     const el = document.getElementById(`comment-${commentId}`)
     if (!el) return
@@ -446,49 +396,17 @@ export default function Listener() {
     setTimeout(() => setHighlightedCommentId(null), 2000)
   }
 
-  async function handleFavorite(trackId: string) {
-    try {
-      const sdk = getSDK()
-      const user = await ensureUser()
-      await sdk.tracks.favoriteTrack({ userId: user.id, trackId })
-      setFavorited((prev) => new Set([...prev, trackId]))
-    } catch (err) {
-      console.error('Favorite failed:', err)
-    }
-  }
-
-  async function handleComment() {
+  function handleComment() {
     if (!commentText.trim() || !tracks.length) return
     const trackId = tracks[commentTrackIdx]?.id
     if (!trackId) return
-
-    setSubmittingComment(true)
-    try {
-      const sdk = getSDK()
-      const user = await ensureUser()
-
-      const numericId = decodeHashId(trackId)
-      if (numericId === null) throw new Error('Invalid track ID')
-
-      await sdk.comments.createComment({
-        userId: user.id,
-        metadata: {
-          entityType: 'Track' as const,
-          entityId: numericId,
-          body: commentText.trim(),
-          trackTimestampS: Math.floor(commentTime ?? currentTime),
-        },
-      })
-
-      setCommentText('')
-      setCommentTime(null)
-      // Invalidate comments cache to refetch
-      await queryClient.invalidateQueries({ queryKey: ['comments', trackId] })
-    } catch (err) {
-      console.error('Comment failed:', err)
-    } finally {
-      setSubmittingComment(false)
-    }
+    postComment.mutate({
+      trackId,
+      body: commentText.trim(),
+      timestampS: Math.floor(commentTime ?? currentTime),
+    })
+    setCommentText('')
+    setCommentTime(null)
   }
 
   if (loadError) {
@@ -503,12 +421,13 @@ export default function Listener() {
   }
 
   if (!tracks.length) {
+    if (!showLoading) return null
     return (
-      <div className="page">
-        <div className="page-header">
-          <h1>Audius AB</h1>
+      <div className="modal-overlay">
+        <div className="modal loading-modal">
+          <div className="spinner" />
+          <p>Loading playlist…</p>
         </div>
-        <p className="loading-msg">Loading playlist…</p>
       </div>
     )
   }
@@ -537,9 +456,10 @@ export default function Listener() {
           <button type="button" className="btn-header" onClick={() => setShowHelp(true)} title="Help">
             ?
           </button>
-          {currentUserHandle ? (
-            <span className="logged-in-badge">@{currentUserHandle}</span>
-          ) : (
+          {currentUserHandle ? (<>
+            <span className="user-handle-text">@{currentUserHandle}</span>
+            <button type="button" className="btn-header btn-logout" onClick={() => { logout().catch(() => {}) }} title="Log out"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+          </>) : (
             <button type="button" className="btn-header btn-login" onClick={() => { ensureUser().catch((err) => console.error('Login failed:', err)) }} title="Log in with Audius">
               Log in
             </button>
@@ -547,7 +467,7 @@ export default function Listener() {
         </div>
       </div>
 
-      {!isReady && (
+      {!isReady && showLoading && (
         <div className="modal-overlay">
           <div className="modal loading-modal">
             <div className="spinner" />
@@ -585,6 +505,7 @@ export default function Listener() {
             <div className="waveform-track-group">
               {renderCommentForm(0)}
               <div className="waveform-time-row">
+                {tracks.length > 1 && <div className="time-row-spacer-toggle" />}
                 <div className="comment-avatars-strip">
                   {(allComments[0] ?? []).map((c) => (
                     <button
@@ -599,9 +520,11 @@ export default function Listener() {
                     </button>
                   ))}
                 </div>
-                <span className="time-display">
-                  {formatTime(Math.min(currentTime, trackDurations[0] ?? duration))} / {formatTime(trackDurations[0] ?? duration)}
-                </span>
+                <div className="time-row-spacer-right">
+                  <span className="time-display">
+                    {formatTime(Math.min(currentTime, trackDurations[0] ?? duration))} / {formatTime(trackDurations[0] ?? duration)}
+                  </span>
+                </div>
               </div>
               <div className={`waveform-row track-a${activeIndex === 0 ? ' active' : ''}`}>
                 {tracks.length > 1 && (
@@ -659,9 +582,9 @@ export default function Listener() {
                 </div>
                 <button
                   type="button"
-                  className={`btn-favorite${favorited.has(tracks[0].id) ? ' favorited' : ''}`}
-                  onClick={() => handleFavorite(tracks[0].id)}
-                  title="Favorite this track"
+                  className={`btn-favorite${trackQueries[0]?.data?.hasCurrentUserSaved ? ' favorited' : ''}`}
+                  onClick={() => toggleFavorite(tracks[0].id)}
+                  title={trackQueries[0]?.data?.hasCurrentUserSaved ? 'Unfavorite this track' : 'Favorite this track'}
                 >
                   ♥
                 </button>
@@ -728,14 +651,15 @@ export default function Listener() {
                 </div>
                 <button
                   type="button"
-                  className={`btn-favorite${favorited.has(tracks[1].id) ? ' favorited' : ''}`}
-                  onClick={() => handleFavorite(tracks[1].id)}
-                  title="Favorite this track"
+                  className={`btn-favorite${trackQueries[1]?.data?.hasCurrentUserSaved ? ' favorited' : ''}`}
+                  onClick={() => toggleFavorite(tracks[1].id)}
+                  title={trackQueries[1]?.data?.hasCurrentUserSaved ? 'Unfavorite this track' : 'Favorite this track'}
                 >
                   ♥
                 </button>
               </div>
               <div className="waveform-time-row">
+                {tracks.length > 1 && <div className="time-row-spacer-toggle" />}
                 <div className="comment-avatars-strip">
                   {(allComments[1] ?? []).map((c) => (
                     <button
@@ -750,9 +674,11 @@ export default function Listener() {
                     </button>
                   ))}
                 </div>
-                <span className="time-display">
-                  {formatTime(Math.min(currentTime, trackDurations[1]))} / {formatTime(trackDurations[1])}
-                </span>
+                <div className="time-row-spacer-right">
+                  <span className="time-display">
+                    {formatTime(Math.min(currentTime, trackDurations[1]))} / {formatTime(trackDurations[1])}
+                  </span>
+                </div>
               </div>
               {renderCommentForm(1)}
             </div>
@@ -801,7 +727,53 @@ export default function Listener() {
                         }}>{formatTime(c.timestampSeconds)}</span>
                         <span className="comment-author">@{c.handle}</span>
                       </div>
-                      <div className="comment-body">{c.body}</div>
+                      {editingComment?.id === c.id ? (
+                        <div className="comment-edit-form">
+                          <textarea
+                            value={editingComment.body}
+                            onChange={(e) => setEditingComment({ ...editingComment, body: e.target.value })}
+                            rows={2}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault()
+                                if (editingComment.body.trim()) {
+                                  editComment.mutate({ commentId: c.id, trackId: track.id, body: editingComment.body.trim() })
+                                  setEditingComment(null)
+                                }
+                              }
+                              if (e.key === 'Escape') setEditingComment(null)
+                            }}
+                            autoFocus
+                          />
+                          <div className="comment-edit-actions">
+                            <button type="button" className="btn-secondary btn-sm" onClick={() => setEditingComment(null)}>Cancel</button>
+                            <button type="button" className="btn-primary btn-sm" disabled={!editingComment.body.trim()} onClick={() => {
+                              editComment.mutate({ commentId: c.id, trackId: track.id, body: editingComment.body.trim() })
+                              setEditingComment(null)
+                            }}>Save</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="comment-body">{c.body}</div>
+                      )}
+                      {(currentUserId && (c.userId === currentUserId || currentUserId === ownerId)) && editingComment?.id !== c.id && (
+                        <div className="comment-actions">
+                          {c.userId === currentUserId && (
+                            <button
+                              type="button"
+                              className="btn-comment-action"
+                              title="Edit comment"
+                              onClick={() => setEditingComment({ id: c.id, trackId: track.id, body: c.body })}
+                            ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+                          )}
+                          <button
+                            type="button"
+                            className="btn-comment-action"
+                            title="Delete comment"
+                            onClick={() => setDeleteConfirm({ commentId: c.id, trackId: track.id })}
+                          ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -810,6 +782,22 @@ export default function Listener() {
           })}
         </div>
       </div>
+
+      {/* Delete confirmation modal */}
+      {deleteConfirm && (
+        <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <p>Delete this comment?</p>
+            <div className="modal-actions">
+              <button type="button" className="btn-secondary" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+              <button type="button" className="btn-primary btn-danger" onClick={() => {
+                deleteComment.mutate({ commentId: deleteConfirm.commentId, trackId: deleteConfirm.trackId })
+                setDeleteConfirm(null)
+              }}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Help modal */}
       {showHelp && (

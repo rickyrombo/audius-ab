@@ -47,7 +47,8 @@ export default function Creator() {
 
       const isAuth = await sdk.oauth.isAuthenticated()
       if (!isAuth) await sdk.oauth.login({ scope: 'write' })
-      const user = await sdk.oauth.getUser()
+      const meResp = await sdk.users.getMe()
+      const user = meResp.data!
 
       const trackIds = await Promise.all(
         filled.map((slot, i) => {
@@ -108,7 +109,7 @@ export default function Creator() {
       })
       if (!result.playlistId) throw new Error('Playlist creation failed')
 
-      return `${window.location.origin}/listen/${result.playlistId}`
+      return result.playlistId
     },
   })
 
@@ -153,9 +154,11 @@ export default function Creator() {
     })
   }
 
-  function handleCopy() {
-    if (!mutation.data) return
-    navigator.clipboard.writeText(mutation.data)
+  const listenUrl = mutation.data ? `${window.location.origin}/analyze/${mutation.data}` : ''
+  const blindUrl = mutation.data ? `${window.location.origin}/blind/${mutation.data}` : ''
+
+  function handleCopy(url: string) {
+    navigator.clipboard.writeText(url)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -166,7 +169,7 @@ export default function Creator() {
         <h1>Audius A/B</h1>
         <p>Upload 1–2 tracks and get a private link you can share that makes it easy for listeners to give feedback and compare your tracks.</p>
         <p>Ideal for A/B testing two versions of a track. Use it to get feedback on two different masters, a change in the mix, or a tweak of an element of your track.</p>
-        <p>Examples: <a href="/listen/EJmKJXo" target="_blank" rel="noopener noreferrer">Single Track Feedback</a> | <a href="/listen/qz2gQwo" target="_blank" rel="noopener noreferrer">A/B Test</a></p>
+        <p>Examples: <a href="/analyze/EJmKJXo" target="_blank" rel="noopener noreferrer">Single Track Feedback</a> | <a href="/analyze/qz2gQwo" target="_blank" rel="noopener noreferrer">A/B Test</a></p>
       </div>
 
       <div className="creator-slots">
@@ -219,16 +222,33 @@ export default function Creator() {
 
       {mutation.data ? (
         <div className="result-box">
-          <p>Share this link with listeners:</p>
-          <div className="result-url">
-            <input id="generated-url" type="text" readOnly value={mutation.data} aria-label="Generated sharing URL" />
-            <button type="button" className="btn-copy" onClick={handleCopy} aria-label="Copy URL to clipboard">
-              {copied ? 'Copied!' : 'Copy'}
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => navigate(`/listen/${mutation.data.split('/listen/')[1]}`)}>
-              View
-            </button>
+          <p>Share these links with listeners:</p>
+          <div className="result-link-group">
+            <label>Analysis</label>
+            <div className="result-url">
+              <input type="text" readOnly value={listenUrl} aria-label="Comparison URL" />
+              <button type="button" className="btn-copy" onClick={() => handleCopy(listenUrl)}>
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => navigate(`/analyze/${mutation.data}`)}>
+                View
+              </button>
+            </div>
           </div>
+          {filledSlots.length >= 2 && (
+            <div className="result-link-group">
+              <label>Blind Test</label>
+              <div className="result-url">
+                <input type="text" readOnly value={blindUrl} aria-label="Blind test URL" />
+                <button type="button" className="btn-copy" onClick={() => handleCopy(blindUrl)}>
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => navigate(`/blind/${mutation.data}`)}>
+                  View
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ): null}
     </div>

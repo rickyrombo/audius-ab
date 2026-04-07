@@ -111,6 +111,16 @@ export default function VolumeIndicator({
   graphMetricRef.current = graphMetric
   const showOverlayRef = useRef(false)
   showOverlayRef.current = showOverlay
+  const trackIndexRef = useRef(trackIndex)
+  trackIndexRef.current = trackIndex
+  const accentColorRef = useRef(accentColor)
+  accentColorRef.current = accentColor
+  const otherAccentColorRef = useRef(otherAccentColor)
+  otherAccentColorRef.current = otherAccentColor
+
+  // Persistent track states that survive prop changes
+  const trackStatesRef = useRef<(TrackLoudnessState | null)[]>([null, null])
+  const lastHistoryPushRef = useRef(0)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -163,14 +173,12 @@ export default function VolumeIndicator({
       }
     }
 
-    const primaryOrNull = createTrackState(trackIndex)
-    if (!primaryOrNull) return
-    const primary: TrackLoudnessState = primaryOrNull
-
-    const otherIndex = trackIndex === 0 ? 1 : 0
-    const other: TrackLoudnessState | null = createTrackState(otherIndex)
-
-    let lastHistoryPush = 0
+    // Initialize track states if not already created (persist across prop changes)
+    for (let i = 0; i < 2; i++) {
+      if (!trackStatesRef.current[i]) {
+        trackStatesRef.current[i] = createTrackState(i)
+      }
+    }
 
     function dbFromLinear(val: number): number {
       return val > 0 ? 20 * Math.log10(val) : -Infinity
@@ -207,21 +215,19 @@ export default function VolumeIndicator({
       return graphTop + ((DB_MAX - clamped) / (DB_MAX - DB_MIN)) * graphH
     }
 
-    // Cached gradients
-    const [hr, hg, hb] = parseHexColor(accentColor)
-    const histFillGrad = ctx.createLinearGradient(0, graphTop, 0, graphBottom)
-    histFillGrad.addColorStop(0, `rgba(${hr},${hg},${hb},0.25)`)
-    histFillGrad.addColorStop(1, `rgba(${hr},${hg},${hb},0.02)`)
-
-    const [ohr, ohg, ohb] = parseHexColor(otherAccentColor)
-    const oHistFillGrad = ctx.createLinearGradient(0, graphTop, 0, graphBottom)
-    oHistFillGrad.addColorStop(0, `rgba(${ohr},${ohg},${ohb},0.15)`)
-    oHistFillGrad.addColorStop(1, `rgba(${ohr},${ohg},${ohb},0.01)`)
+    // Gradient builder (called per-frame since colors can change via refs)
+    function makeGrad(hex: string, alphaHi: number, alphaLo: number): CanvasGradient {
+      const [r, g, b] = parseHexColor(hex)
+      const grad = ctx!.createLinearGradient(0, graphTop, 0, graphBottom)
+      grad.addColorStop(0, `rgba(${r},${g},${b},${alphaHi})`)
+      grad.addColorStop(1, `rgba(${r},${g},${b},${alphaLo})`)
+      return grad
+    }
 
     // Number of analyser frames per 400ms block
-    // The K-weighted analyser has fftSize=2048, so each getFloatTimeDomainData gives 1024 samples
-    // At 44100Hz that's ~23.2ms per frame. 400ms / 23.2ms ≈ 17 frames per block.
-    const kBufLen = primary.kAnalyser.frequencyBinCount
+    const anyState = trackStatesRef.current[0] ?? trackStatesRef.current[1]
+    if (!anyState) return
+    const kBufLen = anyState.kAnalyser.frequencyBinCount
     const frameDurationMs = (kBufLen / sampleRate) * 1000
 
     function processTrack(s: TrackLoudnessState, now: number) {
@@ -379,17 +385,26 @@ export default function VolumeIndicator({
       ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
       const now = performance.now()
 
-      // Process tracks
-      const pRaw = processTrack(primary, now)
-      let oRaw: { momentaryLufs: number; shortTermLufs: number; integratedLufs: number } | null = null
-      if (other) oRaw = processTrack(other, now)
-
-      // Push history
-      if (now - lastHistoryPush > HISTORY_INTERVAL_MS) {
-        pushHistory(primary, pRaw)
-        if (other && oRaw) pushHistory(other, oRaw)
-        lastHistoryPush = now
+      // Always process both tracks so history accumulates regardless of view
+      const states = trackStatesRef.current
+      const rawResults: ({ momentaryLufs: number; shortTermLufs: number; integratedLufs: number } | null)[] = [null, null]
+      for (let i = 0; i < 2; i++) {
+        if (states[i]) rawResults[i] = processTrack(states[i]!, now)
       }
+
+      // Push history for all tracks
+      if (now - lastHistoryPushRef.current > HISTORY_INTERVAL_MS) {
+        for (let i = 0; i < 2; i++) {
+          if (states[i] && rawResults[i]) pushHistory(states[i]!, rawResults[i]!)
+        }
+        lastHistoryPushRef.current = now
+      }
+
+      // Determine primary/other based on current trackIndex ref
+      const curTrackIndex = trackIndexRef.current
+      const primary = states[curTrackIndex]
+      const other = states[curTrackIndex === 0 ? 1 : 0]
+      if (!primary) { rafRef.current = requestAnimationFrame(draw); return }
 
       // ── Draw meters (left side) ──
       const s = primary
@@ -503,20 +518,22 @@ export default function VolumeIndicator({
       }
 
       // Draw overlay history line (behind)
+      const curAccent = accentColorRef.current
+      const curOtherAccent = otherAccentColorRef.current
       if (showOverlayRef.current && other && other.historyLen > 1) {
         const oSelectedBuf = other.historyBufs[selectedMetric]
-        drawHistoryLine(oSelectedBuf, other.historyLen, other.historyHead, otherAccentColor, oHistFillGrad, 0.5)
+        drawHistoryLine(oSelectedBuf, other.historyLen, other.historyHead, curOtherAccent, makeGrad(curOtherAccent, 0.15, 0.01), 0.5)
       }
 
       // Draw primary history line
       if (primary.historyLen > 1) {
-        drawHistoryLine(selectedBuf, primary.historyLen, primary.historyHead, accentColor, histFillGrad, 1)
+        drawHistoryLine(selectedBuf, primary.historyLen, primary.historyHead, curAccent, makeGrad(curAccent, 0.25, 0.02), 1)
 
         // Current value label
         const newestIdx = (primary.historyHead - 1 + maxHistoryPoints) % maxHistoryPoints
         const currentVal = selectedBuf[newestIdx]
         const unitSuffix = selectedMetric === 'peak' || selectedMetric === 'rms' ? ' dBFS' : ' LUFS'
-        ctx!.fillStyle = accentColor
+        ctx!.fillStyle = curAccent
         ctx!.font = 'bold 11px sans-serif'
         ctx!.textAlign = 'left'
         ctx!.fillText(
@@ -545,7 +562,10 @@ export default function VolumeIndicator({
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
-  }, [syncedRef, isPlaying, trackIndex, accentColor, otherAccentColor, showOverlay])
+  // trackIndex, accentColor, otherAccentColor, showOverlay are read from refs
+  // so they don't tear down the effect and lose history
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncedRef, isPlaying])
 
   return (
     <div className="analyzer-panel analyzer-panel-wide">

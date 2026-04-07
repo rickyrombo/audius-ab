@@ -1889,6 +1889,28 @@ kbd {
   flex: 1;
 }
 
+/* ── Short desktop: switch to mobile-like single analyzer ── */
+@media (min-width: 769px) and (max-height: 700px) {
+  .listener-above-fold {
+    grid-template-rows: [header] auto [overlay-bar] auto [mobile-analyzer] 1fr [waveforms] auto;
+  }
+  .analyzers-row {
+    display: none !important;
+  }
+  .mobile-analyzer {
+    display: block;
+    grid-row: mobile-analyzer;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .analyzer-overlay-bar {
+    display: none;
+  }
+  .mobile-analyzer-panel {
+    min-height: 150px;
+  }
+}
+
 /* ── Mobile Responsive ── */
 @media (max-width: 768px) {
   .listener-above-fold {

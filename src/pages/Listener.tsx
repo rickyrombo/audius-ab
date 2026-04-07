@@ -69,7 +69,8 @@ export default function Listener() {
   const [commentTrackIdx, setCommentTrackIdx] = useState(0);
   const [commentTime, setCommentTime] = useState<number | null>(null);
   const [ownerId, setOwnerId] = useState<string | null>(null);
-  const [showHelp, setShowHelp] = useState(false);
+  const [showHelp, setShowHelp] = useState(() => !localStorage.getItem('helpDismissed:analyze'));
+  const dismissHelp = () => { localStorage.setItem('helpDismissed:analyze', '1'); setShowHelp(false); };
   const [showOverlay, setShowOverlay] = useState(false);
   const [highlightedCommentId, setHighlightedCommentId] = useState<
     string | null
@@ -1249,16 +1250,16 @@ export default function Listener() {
       {showHelp && (
         <div
           className="modal-overlay"
-          onClick={() => setShowHelp(false)}
+          onClick={() => dismissHelp()}
           onKeyDown={(e) => {
-            if (e.key === "Escape") setShowHelp(false);
+            if (e.key === "Escape") dismissHelp();
           }}
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
               className="modal-close"
-              onClick={() => setShowHelp(false)}
+              onClick={() => dismissHelp()}
             >
               ✕
             </button>

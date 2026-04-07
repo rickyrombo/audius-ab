@@ -32,7 +32,8 @@ export default function BlindListener() {
   const [revealed, setRevealed] = useState(false);
   const [preference, setPreference] = useState<"A" | "B" | null>(null);
   const [reasonText, setReasonText] = useState("");
-  const [showHelp, setShowHelp] = useState(false);
+  const [showHelp, setShowHelp] = useState(() => !localStorage.getItem('helpDismissed:blind'));
+  const dismissHelp = () => { localStorage.setItem('helpDismissed:blind', '1'); setShowHelp(false); };
   const [ownerName, setOwnerName] = useState<string | null>(null);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [showLoading, setShowLoading] = useState(false);
@@ -698,12 +699,12 @@ export default function BlindListener() {
       )}
 
       {showHelp && (
-        <div className="modal-overlay" onClick={() => setShowHelp(false)}>
+        <div className="modal-overlay" onClick={() => dismissHelp()}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
               className="modal-close"
-              onClick={() => setShowHelp(false)}
+              onClick={() => dismissHelp()}
             >
               ✕
             </button>

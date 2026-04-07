@@ -94,6 +94,8 @@ textarea {
   padding: 12px 24px 8px;
   gap: 6px;
   overflow: hidden;
+  position: relative;
+  z-index: 1;
 }
 
 .page-header {
@@ -135,6 +137,8 @@ textarea {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  position: relative;
+  z-index: 1;
 }
 
 .creator-header {
@@ -330,8 +334,13 @@ textarea {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--text-muted);
   margin-bottom: 6px;
+}
+.label-optional {
+  font-weight: 400;
+  text-transform: none;
+  color: var(--text-muted);
+  letter-spacing: 0;
 }
 
 .btn-primary {
@@ -750,12 +759,12 @@ kbd {
   border-radius: var(--radius);
 }
 .btn-favorite:hover {
-  color: #ff6b6b;
-  border-color: #ff6b6b;
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .btn-favorite.favorited {
-  color: #ff6b6b;
-  border-color: #ff6b6b;
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .btn-playpause {
@@ -799,6 +808,8 @@ kbd {
 .comments-section {
   border-top: 1px solid var(--border);
   padding: 20px 24px 80px;
+  position: relative;
+  z-index: 1;
 }
 
 .comments-columns {
@@ -1105,11 +1116,40 @@ kbd {
   flex: 2;
 }
 
+.loudness-bottom-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+}
+.loudness-stats {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.loudness-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.loudness-stat-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.loudness-stat-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
 .loudness-metric-tabs {
   display: flex;
   gap: 4px;
-  margin-top: 6px;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .loudness-metric-tab {

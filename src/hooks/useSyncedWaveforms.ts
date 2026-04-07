@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SyncedWaveforms } from "../lib/waveforms";
-import type { WaveformColorData } from "../lib/waveformAnalysis";
+import type { WaveformColorData, LoudnessStats } from "../lib/waveformAnalysis";
 
 export function useSyncedWaveforms(
   streamUrls: string[],
@@ -15,6 +15,7 @@ export function useSyncedWaveforms(
   const [trackDurations, setTrackDurations] = useState<number[]>([]);
   const [colorData, setColorData] = useState<(WaveformColorData | null)[]>([]);
   const [bpms, setBpms] = useState<number[]>([]);
+  const [loudnessStats, setLoudnessStats] = useState<(LoudnessStats | null)[]>([]);
   const seekWhilePausedRef = useRef(onSeekWhilePaused);
   seekWhilePausedRef.current = onSeekWhilePaused;
   const finishRef = useRef(onFinish);
@@ -32,6 +33,7 @@ export function useSyncedWaveforms(
     setDuration(0);
     setColorData([]);
     setBpms([]);
+    setLoudnessStats([]);
 
     synced.onReady(() => {
       setIsReady(true);
@@ -40,6 +42,7 @@ export function useSyncedWaveforms(
       setColorData(streamUrls.map((_, i) => synced.getColorData(i)));
       const detectedBpms = streamUrls.map((_, i) => synced.getBPM(i));
       setBpms(detectedBpms);
+      setLoudnessStats(streamUrls.map((_, i) => synced.getLoudnessStats(i)));
       console.log('[BPM]', detectedBpms.map((bpm, i) => `Track ${i}: ${bpm} BPM`).join(', '));
     });
     let lastStateUpdate = 0;
@@ -73,6 +76,7 @@ export function useSyncedWaveforms(
     trackDurations,
     colorData,
     bpms,
+    loudnessStats,
     play: () => syncedRef.current?.play(),
     pause: () => syncedRef.current?.pause(),
     seek: (progress: number) => syncedRef.current?.seek(progress),

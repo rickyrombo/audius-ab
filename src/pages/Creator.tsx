@@ -2,6 +2,7 @@ import { useState, useRef, useId } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import { getSDK } from '../lib/audius'
+
 import { Genre } from '@audius/sdk/src/sdk/api/generated/default/models/Genre'
 
 const LABELS = ['A', 'B']
@@ -34,6 +35,7 @@ export default function Creator() {
   const nextId = () => `${uid}-${counter.current++}`
 
   const [slots, setSlots] = useState<TrackSlot[]>([makeSlot(nextId())])
+  const [playlistName, setPlaylistName] = useState('')
   const [question, setQuestion] = useState('')
   const [copied, setCopied] = useState(false)
   const navigate = useNavigate()
@@ -101,7 +103,7 @@ export default function Creator() {
       const result = await sdk.playlists.createPlaylist({
         userId: user.id,
         metadata: {
-          playlistName: defaultName,
+          playlistName: playlistName.trim() || defaultName,
           description: question.trim() || undefined,
           isPrivate: true,
           playlistContents: trackIds.map((id) => ({ trackId: id, timestamp: now })),
@@ -195,13 +197,32 @@ export default function Creator() {
       </div>
 
       <div className="field">
-        <label htmlFor="question">Feedback Question</label>
+        <label htmlFor="playlist-name">Project Name <span className="label-optional">(optional)</span></label>
+        <input
+          id="playlist-name"
+          type="text"
+          placeholder={(() => {
+            const titles = slots.filter((s) => s.title).map((s) => s.title)
+            return titles.length >= 2
+              ? `A/B Test: ${titles[0]} vs ${titles[1]}`
+              : titles.length === 1
+                ? `Feedback Request: ${titles[0]}`
+                : 'A/B Test'
+          })()}
+          value={playlistName}
+          onChange={(e) => setPlaylistName(e.target.value)}
+          disabled={mutation.isPending || mutation.isSuccess}
+        />
+      </div>
+
+      <div className="field">
+        <label htmlFor="question">Feedback Question <span className="label-optional">(optional)</span></label>
         <textarea
           id="question"
           placeholder="Which mix translates better on small speakers?"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          disabled={mutation.isPending}
+          disabled={mutation.isPending || mutation.isSuccess}
         />
       </div>
 

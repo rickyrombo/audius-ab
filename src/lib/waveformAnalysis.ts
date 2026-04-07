@@ -218,6 +218,150 @@ export function analyzeWaveformColors(
   }
 }
 
+// ── Offline Integrated LUFS + LRA (ITU-R BS.1770 / EBU R128) ──────────────
+
+export interface LoudnessStats {
+  integratedLUFS: number
+  lra: number  // Loudness Range in LU
+}
+
+/**
+ * K-weighting filter coefficients for ITU-R BS.1770.
+ * Stage 1: High-shelf boost (+4dB above ~1.5kHz)
+ * Stage 2: High-pass (RLB weighting, ~38Hz)
+ */
+function kWeightHighShelf(sampleRate: number): BiquadCoeffs {
+  const w0 = 2 * Math.PI * 1681.974 / sampleRate
+  const alpha = Math.sin(w0) / (2 * 0.7071)
+  const cosw0 = Math.cos(w0)
+  const A = Math.pow(10, 3.999 / 40) // +4dB
+  const a0 = (A + 1) - (A - 1) * cosw0 + 2 * Math.sqrt(A) * alpha
+  return {
+    b0: (A * ((A + 1) + (A - 1) * cosw0 + 2 * Math.sqrt(A) * alpha)) / a0,
+    b1: (-2 * A * ((A - 1) + (A + 1) * cosw0)) / a0,
+    b2: (A * ((A + 1) + (A - 1) * cosw0 - 2 * Math.sqrt(A) * alpha)) / a0,
+    a1: (2 * ((A - 1) - (A + 1) * cosw0)) / a0,
+    a2: ((A + 1) - (A - 1) * cosw0 - 2 * Math.sqrt(A) * alpha) / a0,
+  }
+}
+
+function kWeightHighPass(sampleRate: number): BiquadCoeffs {
+  const w0 = 2 * Math.PI * 38.135 / sampleRate
+  const alpha = Math.sin(w0) / (2 * 0.5003)
+  const cosw0 = Math.cos(w0)
+  const a0 = 1 + alpha
+  return {
+    b0: ((1 + cosw0) / 2) / a0,
+    b1: (-(1 + cosw0)) / a0,
+    b2: ((1 + cosw0) / 2) / a0,
+    a1: (-2 * cosw0) / a0,
+    a2: (1 - alpha) / a0,
+  }
+}
+
+/**
+ * Compute integrated LUFS and LRA from an AudioBuffer offline.
+ * Uses 400ms blocks with 75% overlap, K-weighted per ITU-R BS.1770.
+ * LRA computed per EBU R128 (10th to 95th percentile of short-term loudness).
+ */
+export function analyzeLoudness(buffer: AudioBuffer): LoudnessStats {
+  const sampleRate = buffer.sampleRate
+  const numChannels = buffer.numberOfChannels
+  const totalSamples = buffer.length
+
+  // K-weight each channel
+  const kWeighted: Float64Array[] = []
+  for (let c = 0; c < numChannels; c++) {
+    const raw = buffer.getChannelData(c)
+    const shelf = kWeightHighShelf(sampleRate)
+    const shelfState = makeBiquadState()
+    const hp = kWeightHighPass(sampleRate)
+    const hpState = makeBiquadState()
+    const out = new Float64Array(totalSamples)
+    for (let i = 0; i < totalSamples; i++) {
+      out[i] = biquadProcess(hp, hpState, biquadProcess(shelf, shelfState, raw[i]))
+    }
+    kWeighted.push(out)
+  }
+
+  // 400ms block size, 100ms hop (75% overlap per BS.1770)
+  const blockSamples = Math.round(sampleRate * 0.4)
+  const hopSamples = Math.round(sampleRate * 0.1)
+  const numBlocks = Math.floor((totalSamples - blockSamples) / hopSamples) + 1
+  if (numBlocks <= 0) return { integratedLUFS: -Infinity, lra: 0 }
+
+  // Compute mean square per block (sum across channels with equal weighting)
+  const blockMs = new Float64Array(numBlocks)
+  for (let b = 0; b < numBlocks; b++) {
+    const start = b * hopSamples
+    let sum = 0
+    for (let c = 0; c < numChannels; c++) {
+      const ch = kWeighted[c]
+      for (let i = start; i < start + blockSamples; i++) {
+        sum += ch[i] * ch[i]
+      }
+    }
+    blockMs[b] = sum / (blockSamples * numChannels)
+  }
+
+  function lufs(ms: number): number {
+    return ms > 0 ? -0.691 + 10 * Math.log10(ms) : -Infinity
+  }
+
+  const ABSOLUTE_GATE = -70 // LUFS
+
+  // ── Integrated LUFS (BS.1770 gated) ──
+  // Pass 1: absolute gate
+  const aboveAbsolute: number[] = []
+  for (let i = 0; i < numBlocks; i++) {
+    if (lufs(blockMs[i]) > ABSOLUTE_GATE) aboveAbsolute.push(i)
+  }
+  if (aboveAbsolute.length === 0) return { integratedLUFS: -Infinity, lra: 0 }
+
+  let ungatedSum = 0
+  for (const i of aboveAbsolute) ungatedSum += blockMs[i]
+  const ungatedMean = lufs(ungatedSum / aboveAbsolute.length)
+
+  // Pass 2: relative gate (-10 LU below ungated mean)
+  const relativeThreshold = ungatedMean - 10
+  let gatedSum = 0, gatedCount = 0
+  for (const i of aboveAbsolute) {
+    if (lufs(blockMs[i]) > relativeThreshold) {
+      gatedSum += blockMs[i]
+      gatedCount++
+    }
+  }
+  const integratedLUFS = gatedCount > 0 ? lufs(gatedSum / gatedCount) : -Infinity
+
+  // ── LRA (EBU R128) ──
+  // Short-term loudness: 3s window, 1-block hop over the 400ms blocks
+  // Each short-term window spans 30 blocks (3s / 0.1s hop)
+  const stBlocks = Math.round(3.0 / (hopSamples / sampleRate))
+  const numST = Math.max(0, numBlocks - stBlocks + 1)
+  const stLoudness: number[] = []
+  for (let s = 0; s < numST; s++) {
+    let sum = 0
+    for (let b = s; b < s + stBlocks; b++) sum += blockMs[b]
+    const l = lufs(sum / stBlocks)
+    if (l > ABSOLUTE_GATE) stLoudness.push(l)
+  }
+
+  let lra = 0
+  if (stLoudness.length >= 2) {
+    // Relative gate on short-term values
+    const stMean = stLoudness.reduce((a, b) => a + b, 0) / stLoudness.length
+    const stRelThresh = stMean - 20 // EBU R128 uses -20 LU for LRA
+    const gated = stLoudness.filter(l => l > stRelThresh).sort((a, b) => a - b)
+    if (gated.length >= 2) {
+      const p10 = gated[Math.floor(gated.length * 0.1)]
+      const p95 = gated[Math.floor(gated.length * 0.95)]
+      lra = p95 - p10
+    }
+  }
+
+  return { integratedLUFS, lra }
+}
+
 // ── BPM Detection ──────────────────────────────────────────────────────────
 
 const BPM_MIN = 60

@@ -1,4 +1,4 @@
-import { analyzeWaveformColors, detectBPM, type WaveformColorData } from "./waveformAnalysis";
+import { analyzeWaveformColors, analyzeLoudness, detectBPM, type WaveformColorData, type LoudnessStats } from "./waveformAnalysis";
 import { getCachedAudio, setCachedAudio, getCachedWaveform, setCachedWaveform } from "./audioCache";
 
 type ReadyCallback = () => void;
@@ -10,6 +10,7 @@ export class SyncedWaveforms {
   private audioBuffers: AudioBuffer[] = [];
   private colorData: WaveformColorData[] = [];
   private bpms: number[] = [];
+  private loudnessStats: LoudnessStats[] = [];
   private gainNodes: GainNode[] = [];
   private sources: AudioBufferSourceNode[] = [];
   private activeIndex = 0;
@@ -175,8 +176,9 @@ export class SyncedWaveforms {
       }),
     );
 
-    // BPM detection for each track
+    // BPM detection and loudness analysis for each track
     this.bpms = buffers.map((buf) => detectBPM(buf));
+    this.loudnessStats = buffers.map((buf) => analyzeLoudness(buf));
 
     this.readyCb?.();
   }
@@ -292,6 +294,10 @@ export class SyncedWaveforms {
     return this.bpms[i] ?? 120;
   }
 
+  getLoudnessStats(i: number): LoudnessStats | null {
+    return this.loudnessStats[i] ?? null;
+  }
+
   getProgress(): number {
     const dur = this.getDuration();
     if (dur <= 0) return 0;
@@ -327,6 +333,7 @@ export class SyncedWaveforms {
     this.audioBuffers = [];
     this.colorData = [];
     this.bpms = [];
+    this.loudnessStats = [];
     this.trackAnalysers = [];
     this.trackSplitters = [];
     this.trackAnalysersL = [];

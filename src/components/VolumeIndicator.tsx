@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SyncedWaveforms } from '../lib/waveforms'
+import type { LoudnessStats } from '../lib/waveformAnalysis'
 
 interface Props {
   syncedRef: React.MutableRefObject<SyncedWaveforms | null>
@@ -8,6 +9,7 @@ interface Props {
   accentColor?: string
   otherAccentColor?: string
   showOverlay?: boolean
+  loudnessStats?: LoudnessStats | null
 }
 
 // ITU-R BS.1770 / EBU R128 constants
@@ -100,6 +102,7 @@ export default function VolumeIndicator({
   syncedRef, isPlaying, trackIndex,
   accentColor = '#cc0000', otherAccentColor = '#888888',
   showOverlay = false,
+  loudnessStats,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
@@ -548,17 +551,31 @@ export default function VolumeIndicator({
     <div className="analyzer-panel analyzer-panel-wide">
       <div className="analyzer-label">Loudness</div>
       <canvas ref={canvasRef} className="analyzer-canvas volume-canvas" />
-      <div className="loudness-metric-tabs">
-        {(Object.keys(METRIC_LABELS) as GraphMetric[]).map((key) => (
-          <button
-            key={key}
-            type="button"
-            className={`loudness-metric-tab${graphMetric === key ? ' active' : ''}`}
-            onClick={() => setGraphMetric(key)}
-          >
-            {METRIC_LABELS[key]}
-          </button>
-        ))}
+      <div className="loudness-bottom-row">
+        {loudnessStats && isFinite(loudnessStats.integratedLUFS) && (
+          <div className="loudness-stats">
+            <span className="loudness-stat">
+              <span className="loudness-stat-label">Integrated</span>
+              <span className="loudness-stat-value">{loudnessStats.integratedLUFS.toFixed(1)} LUFS</span>
+            </span>
+            <span className="loudness-stat">
+              <span className="loudness-stat-label">LRA</span>
+              <span className="loudness-stat-value">{loudnessStats.lra.toFixed(1)} LU</span>
+            </span>
+          </div>
+        )}
+        <div className="loudness-metric-tabs">
+          {(Object.keys(METRIC_LABELS) as GraphMetric[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={`loudness-metric-tab${graphMetric === key ? ' active' : ''}`}
+              onClick={() => setGraphMetric(key)}
+            >
+              {METRIC_LABELS[key]}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

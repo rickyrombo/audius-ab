@@ -15,6 +15,7 @@ import SpaceAnalyzer from '../components/SpaceAnalyzer'
 import VolumeIndicator from '../components/VolumeIndicator'
 import RGBWaveform from '../components/RGBWaveform'
 import ZoomedWaveform from '../components/ZoomedWaveform'
+import { useBackgroundVisualizer } from '../contexts/BackgroundVisualizerContext'
 
 const LABELS = ['A', 'B']
 
@@ -92,7 +93,7 @@ export default function Listener() {
 
   const streamUrls = tracks.map((t) => t.streamUrl)
 
-  const { isReady, currentTime, duration, trackDurations, colorData, bpms, play, pause, seek, setActive, syncedRef } =
+  const { isReady, currentTime, duration, trackDurations, colorData, bpms, loudnessStats, play, pause, seek, setActive, syncedRef } =
     useSyncedWaveforms(streamUrls, trackIds, (time) => {
       setCommentTime(time)
     }, () => {
@@ -168,7 +169,12 @@ export default function Listener() {
   // Check if user is already logged in (don't force login)
   useEffect(() => { checkAuth() }, [checkAuth])
 
-
+  // Sync playback state to background visualizer
+  const bgViz = useBackgroundVisualizer()
+  useEffect(() => {
+    bgViz.setIsPlaying(isPlaying)
+    bgViz.setBpm(bpms[activeIndex] ?? 120)
+  }, [isPlaying, bpms, activeIndex, bgViz])
 
   // Refs for hotkey handlers to avoid stale closures
   const activeIndexRef = useRef(activeIndex)
@@ -493,7 +499,7 @@ export default function Listener() {
       <div className="analyzers-row track-a">
         <SpectrumAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} accentColor="#e06030" otherAccentColor="#3080e0" showOverlay={showOverlay} />
         <SpaceAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} accentColor="#e06030" otherAccentColor="#3080e0" showOverlay={showOverlay} />
-        <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} accentColor="#e06030" otherAccentColor="#3080e0" showOverlay={showOverlay} />
+        <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} accentColor="#e06030" otherAccentColor="#3080e0" showOverlay={showOverlay} loudnessStats={loudnessStats[0]} />
       </div>
 
       {/* Waveform area */}
@@ -692,7 +698,7 @@ export default function Listener() {
         <div className="analyzers-row track-b">
           <SpectrumAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} accentColor="#3080e0" otherAccentColor="#e06030" showOverlay={showOverlay} />
           <SpaceAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} accentColor="#3080e0" otherAccentColor="#e06030" showOverlay={showOverlay} />
-          <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} accentColor="#3080e0" otherAccentColor="#e06030" showOverlay={showOverlay} />
+          <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} accentColor="#3080e0" otherAccentColor="#e06030" showOverlay={showOverlay} loudnessStats={loudnessStats[1]} />
         </div>
       )}
 

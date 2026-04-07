@@ -5,10 +5,17 @@ interface Props {
   syncedRef: React.MutableRefObject<SyncedWaveforms | null>
   isPlaying: boolean
   trackIndex: number
+  accentColor?: string
+  otherAccentColor?: string
+  showOverlay?: boolean
 }
 
-// EBU R128 short-term integration = 3 seconds
+// ITU-R BS.1770 / EBU R128 constants
+const MOMENTARY_WINDOW_MS = 400
 const SHORT_TERM_WINDOW_S = 3
+const ABSOLUTE_GATE_LUFS = -70
+const RELATIVE_GATE_OFFSET = -10 // dB below ungated mean
+
 const HISTORY_DURATION_S = 30
 const HISTORY_INTERVAL_MS = 50
 
@@ -22,12 +29,85 @@ const METRIC_LABELS: Record<GraphMetric, string> = {
   integrated: 'Integrated LUFS',
 }
 
-export default function VolumeIndicator({ syncedRef, isPlaying, trackIndex }: Props) {
+function parseHexColor(hex: string): [number, number, number] {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ]
+}
+
+// Mean-square of a Float32Array buffer
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function meanSquare(buf: Float32Array<any>, len: number): number {
+  let sum = 0
+  for (let i = 0; i < len; i++) sum += buf[i] * buf[i]
+  return sum / len
+}
+
+function lufsFromMeanSquare(ms: number): number {
+  // LUFS = -0.691 + 10 * log10(mean_square)
+  return ms > 0 ? -0.691 + 10 * Math.log10(ms) : -Infinity
+}
+
+// State for one track's loudness processing
+interface TrackLoudnessState {
+  // Raw analyser (for peak/RMS dBFS)
+  analyser: AnalyserNode
+  timeDomain: Float32Array<ArrayBuffer>
+  // K-weighted analyser (for LUFS)
+  kAnalyser: AnalyserNode
+  kTimeDomain: Float32Array<ArrayBuffer>
+  bufLen: number
+
+  // 400ms block ring buffer for momentary/short-term
+  // Each entry stores the mean-square of one 400ms block (K-weighted)
+  blockMs: Float64Array
+  blockTimestamps: Float64Array
+  blockHead: number
+  blockCount: number
+  // Accumulator for building current 400ms block
+  blockAccumMs: number
+  blockAccumFrames: number
+  lastBlockTime: number
+
+  // Integrated LUFS: all 400ms blocks that pass absolute gate
+  integratedBlocks: Float64Array // store all block mean-squares
+  integratedBlockCount: number
+
+  // Smoothed display values
+  smoothPeakDb: number
+  smoothRmsDb: number
+  smoothMomentaryLufs: number
+  smoothShortTermLufs: number
+  smoothIntegratedLufs: number
+
+  // Peak hold
+  peakHold: number
+  peakHoldTime: number
+
+  // History ring buffers
+  historyBufs: Record<GraphMetric, Float32Array>
+  historyLen: number
+  historyHead: number
+}
+
+const PEAK_HOLD_MS = 1500
+const MAX_BLOCKS = Math.ceil((HISTORY_DURATION_S + 10) * (1000 / MOMENTARY_WINDOW_MS)) // ~100 blocks
+const MAX_INTEGRATED_BLOCKS = 10000 // enough for ~66 minutes
+
+export default function VolumeIndicator({
+  syncedRef, isPlaying, trackIndex,
+  accentColor = '#cc0000', otherAccentColor = '#888888',
+  showOverlay = false,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
   const [graphMetric, setGraphMetric] = useState<GraphMetric>('short')
   const graphMetricRef = useRef<GraphMetric>(graphMetric)
   graphMetricRef.current = graphMetric
+  const showOverlayRef = useRef(false)
+  showOverlayRef.current = showOverlay
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -37,39 +117,56 @@ export default function VolumeIndicator({ syncedRef, isPlaying, trackIndex }: Pr
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const analyser = synced.getTrackAnalyser(trackIndex)
-    if (!analyser) return
-    const bufLen = analyser.frequencyBinCount
-    const timeDomain = new Float32Array(bufLen)
-
-    // Peak hold
-    let peakHold = -Infinity
-    let peakHoldTime = 0
-    const PEAK_HOLD_MS = 1500
-
-    // Smoothing for meters
-    let smoothPeakDb = -60
-    let smoothRmsDb = -60
-    let smoothMomentaryLufs = -60
-    let smoothShortTermLufs = -60
-    let smoothIntegratedLufs = -60
-
-    // Ring buffer for short-term LUFS integration
-    const msRingBuffer: { ms: number; t: number }[] = []
-
-    // Integrated LUFS: running sum of all mean-square values
-    let integratedSum = 0
-    let integratedCount = 0
-
-    // History buffers for each metric
+    const sampleRate = synced.getSampleRate()
     const maxHistoryPoints = Math.ceil(HISTORY_DURATION_S * (1000 / HISTORY_INTERVAL_MS))
-    const history: Record<GraphMetric, number[]> = {
-      peak: [],
-      rms: [],
-      momentary: [],
-      short: [],
-      integrated: [],
+
+    function createTrackState(idx: number): TrackLoudnessState | null {
+      const analyser = synced!.getTrackAnalyser(idx)
+      const kAnalyser = synced!.getTrackKWeightedAnalyser(idx)
+      if (!analyser || !kAnalyser) return null
+
+      const bufLen = analyser.frequencyBinCount
+      return {
+        analyser,
+        timeDomain: new Float32Array(bufLen),
+        kAnalyser,
+        kTimeDomain: new Float32Array(kAnalyser.frequencyBinCount),
+        bufLen,
+        blockMs: new Float64Array(MAX_BLOCKS),
+        blockTimestamps: new Float64Array(MAX_BLOCKS),
+        blockHead: 0,
+        blockCount: 0,
+        blockAccumMs: 0,
+        blockAccumFrames: 0,
+        lastBlockTime: 0,
+        integratedBlocks: new Float64Array(MAX_INTEGRATED_BLOCKS),
+        integratedBlockCount: 0,
+        smoothPeakDb: -60,
+        smoothRmsDb: -60,
+        smoothMomentaryLufs: -60,
+        smoothShortTermLufs: -60,
+        smoothIntegratedLufs: -60,
+        peakHold: -Infinity,
+        peakHoldTime: 0,
+        historyBufs: {
+          peak: new Float32Array(maxHistoryPoints).fill(-60),
+          rms: new Float32Array(maxHistoryPoints).fill(-60),
+          momentary: new Float32Array(maxHistoryPoints).fill(-60),
+          short: new Float32Array(maxHistoryPoints).fill(-60),
+          integrated: new Float32Array(maxHistoryPoints).fill(-60),
+        },
+        historyLen: 0,
+        historyHead: 0,
+      }
     }
+
+    const primaryOrNull = createTrackState(trackIndex)
+    if (!primaryOrNull) return
+    const primary: TrackLoudnessState = primaryOrNull
+
+    const otherIndex = trackIndex === 0 ? 1 : 0
+    const other: TrackLoudnessState | null = createTrackState(otherIndex)
+
     let lastHistoryPush = 0
 
     function dbFromLinear(val: number): number {
@@ -107,82 +204,198 @@ export default function VolumeIndicator({ syncedRef, isPlaying, trackIndex }: Pr
       return graphTop + ((DB_MAX - clamped) / (DB_MAX - DB_MIN)) * graphH
     }
 
-    function draw() {
-      ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
+    // Cached gradients
+    const [hr, hg, hb] = parseHexColor(accentColor)
+    const histFillGrad = ctx.createLinearGradient(0, graphTop, 0, graphBottom)
+    histFillGrad.addColorStop(0, `rgba(${hr},${hg},${hb},0.25)`)
+    histFillGrad.addColorStop(1, `rgba(${hr},${hg},${hb},0.02)`)
 
-      analyser.getFloatTimeDomainData(timeDomain)
+    const [ohr, ohg, ohb] = parseHexColor(otherAccentColor)
+    const oHistFillGrad = ctx.createLinearGradient(0, graphTop, 0, graphBottom)
+    oHistFillGrad.addColorStop(0, `rgba(${ohr},${ohg},${ohb},0.15)`)
+    oHistFillGrad.addColorStop(1, `rgba(${ohr},${ohg},${ohb},0.01)`)
 
-      const now = performance.now()
+    // Number of analyser frames per 400ms block
+    // The K-weighted analyser has fftSize=2048, so each getFloatTimeDomainData gives 1024 samples
+    // At 44100Hz that's ~23.2ms per frame. 400ms / 23.2ms ≈ 17 frames per block.
+    const kBufLen = primary.kAnalyser.frequencyBinCount
+    const frameDurationMs = (kBufLen / sampleRate) * 1000
 
-      // Compute peak and RMS (momentary)
+    function processTrack(s: TrackLoudnessState, now: number) {
+      // ── Raw peak/RMS (unweighted, for dBFS meters) ──
+      s.analyser.getFloatTimeDomainData(s.timeDomain)
       let peak = 0
       let sumSq = 0
-      for (let i = 0; i < bufLen; i++) {
-        const abs = Math.abs(timeDomain[i])
+      for (let i = 0; i < s.bufLen; i++) {
+        const abs = Math.abs(s.timeDomain[i])
         if (abs > peak) peak = abs
-        sumSq += timeDomain[i] * timeDomain[i]
+        sumSq += s.timeDomain[i] * s.timeDomain[i]
       }
-      const meanSquare = sumSq / bufLen
-      const rms = Math.sqrt(meanSquare)
-
       const peakDb = Math.max(-60, dbFromLinear(peak))
-      const rmsDb = Math.max(-60, dbFromLinear(rms))
-      const momentaryLufs = Math.max(-60, dbFromLinear(rms) - 0.691)
+      const rmsDb = Math.max(-60, dbFromLinear(Math.sqrt(sumSq / s.bufLen)))
 
-      // Short-term LUFS: integrate mean-square over 3s window
-      msRingBuffer.push({ ms: meanSquare, t: now })
-      const windowStart = now - SHORT_TERM_WINDOW_S * 1000
-      while (msRingBuffer.length > 0 && msRingBuffer[0].t < windowStart) {
-        msRingBuffer.shift()
+      // ── K-weighted loudness ──
+      s.kAnalyser.getFloatTimeDomainData(s.kTimeDomain)
+      const frameMeanSq = meanSquare(s.kTimeDomain, kBufLen)
+
+      // Accumulate into 400ms blocks
+      s.blockAccumMs += frameMeanSq
+      s.blockAccumFrames++
+      const blockElapsed = s.blockAccumFrames * frameDurationMs
+
+      // Momentary LUFS = loudness of current accumulation (always available, converges to 400ms)
+      const momentaryMs = s.blockAccumMs / s.blockAccumFrames
+      const momentaryLufs = Math.max(-60, lufsFromMeanSquare(momentaryMs))
+
+      // When we've accumulated 400ms, commit the block
+      if (blockElapsed >= MOMENTARY_WINDOW_MS) {
+        const blockMeanSq = s.blockAccumMs / s.blockAccumFrames
+
+        // Store in ring buffer
+        s.blockMs[s.blockHead] = blockMeanSq
+        s.blockTimestamps[s.blockHead] = now
+        s.blockHead = (s.blockHead + 1) % MAX_BLOCKS
+        if (s.blockCount < MAX_BLOCKS) s.blockCount++
+
+        // Store for integrated LUFS (only if above absolute gate)
+        const blockLufs = lufsFromMeanSquare(blockMeanSq)
+        if (blockLufs > ABSOLUTE_GATE_LUFS && s.integratedBlockCount < MAX_INTEGRATED_BLOCKS) {
+          s.integratedBlocks[s.integratedBlockCount++] = blockMeanSq
+        }
+
+        s.blockAccumMs = 0
+        s.blockAccumFrames = 0
+        s.lastBlockTime = now
       }
-      let stSum = 0
-      for (let i = 0; i < msRingBuffer.length; i++) {
-        stSum += msRingBuffer[i].ms
+
+      // Short-term LUFS: mean of 400ms blocks within last 3 seconds
+      const shortWindowStart = now - SHORT_TERM_WINDOW_S * 1000
+      let stSum = 0, stCount = 0
+      for (let i = 0; i < s.blockCount; i++) {
+        const idx = (s.blockHead - s.blockCount + i + MAX_BLOCKS) % MAX_BLOCKS
+        if (s.blockTimestamps[idx] >= shortWindowStart) {
+          stSum += s.blockMs[idx]
+          stCount++
+        }
       }
-      const stMeanSquare = msRingBuffer.length > 0 ? stSum / msRingBuffer.length : 0
-      const shortTermLufs = Math.max(-60, dbFromLinear(Math.sqrt(stMeanSquare)) - 0.691)
+      const shortTermLufs = stCount > 0
+        ? Math.max(-60, lufsFromMeanSquare(stSum / stCount))
+        : -60
 
-      // Integrated LUFS: running average over entire playback
-      integratedSum += meanSquare
-      integratedCount++
-      const intMeanSquare = integratedSum / integratedCount
-      const integratedLufs = Math.max(-60, dbFromLinear(Math.sqrt(intMeanSquare)) - 0.691)
+      // Integrated LUFS: gated mean of all 400ms blocks
+      let integratedLufs = -60
+      if (s.integratedBlockCount > 0) {
+        // First pass: ungated mean (already past absolute gate from storage filter)
+        let ungatedSum = 0
+        for (let i = 0; i < s.integratedBlockCount; i++) {
+          ungatedSum += s.integratedBlocks[i]
+        }
+        const ungatedMeanLufs = lufsFromMeanSquare(ungatedSum / s.integratedBlockCount)
 
-      // Smooth meter values
-      smoothPeakDb += (peakDb - smoothPeakDb) * 0.4
-      smoothRmsDb += (rmsDb - smoothRmsDb) * 0.2
-      smoothMomentaryLufs += (momentaryLufs - smoothMomentaryLufs) * 0.25
-      smoothShortTermLufs += (shortTermLufs - smoothShortTermLufs) * 0.1
-      smoothIntegratedLufs += (integratedLufs - smoothIntegratedLufs) * 0.05
+        // Second pass: relative gate — only blocks above (ungatedMean - 10 dB)
+        const relativeThreshold = ungatedMeanLufs + RELATIVE_GATE_OFFSET
+        let gatedSum = 0, gatedCount = 0
+        for (let i = 0; i < s.integratedBlockCount; i++) {
+          const bLufs = lufsFromMeanSquare(s.integratedBlocks[i])
+          if (bLufs > relativeThreshold) {
+            gatedSum += s.integratedBlocks[i]
+            gatedCount++
+          }
+        }
+        if (gatedCount > 0) {
+          integratedLufs = Math.max(-60, lufsFromMeanSquare(gatedSum / gatedCount))
+        }
+      }
+
+      // Smooth display values
+      s.smoothPeakDb += (peakDb - s.smoothPeakDb) * 0.4
+      s.smoothRmsDb += (rmsDb - s.smoothRmsDb) * 0.2
+      s.smoothMomentaryLufs += (momentaryLufs - s.smoothMomentaryLufs) * 0.25
+      s.smoothShortTermLufs += (shortTermLufs - s.smoothShortTermLufs) * 0.1
+      s.smoothIntegratedLufs += (integratedLufs - s.smoothIntegratedLufs) * 0.05
 
       // Peak hold
-      if (peakDb >= peakHold) {
-        peakHold = peakDb
-        peakHoldTime = now
-      } else if (now - peakHoldTime > PEAK_HOLD_MS) {
-        peakHold += (peakDb - peakHold) * 0.05
+      if (peakDb >= s.peakHold) {
+        s.peakHold = peakDb
+        s.peakHoldTime = now
+      } else if (now - s.peakHoldTime > PEAK_HOLD_MS) {
+        s.peakHold += (peakDb - s.peakHold) * 0.05
       }
 
-      // Push to all history buffers
+      return { momentaryLufs, shortTermLufs, integratedLufs }
+    }
+
+    function pushHistory(s: TrackLoudnessState, raw: { momentaryLufs: number; shortTermLufs: number; integratedLufs: number }) {
+      s.historyBufs.peak[s.historyHead] = s.smoothPeakDb
+      s.historyBufs.rms[s.historyHead] = s.smoothRmsDb
+      s.historyBufs.momentary[s.historyHead] = raw.momentaryLufs
+      s.historyBufs.short[s.historyHead] = raw.shortTermLufs
+      s.historyBufs.integrated[s.historyHead] = raw.integratedLufs
+      s.historyHead = (s.historyHead + 1) % maxHistoryPoints
+      if (s.historyLen < maxHistoryPoints) s.historyLen++
+    }
+
+    function drawHistoryLine(
+      buf: Float32Array, hLen: number, hHead: number,
+      strokeColor: string, fillGrad: CanvasGradient,
+      alpha: number,
+    ) {
+      if (hLen <= 1) return
+      const pointsPerSec = 1000 / HISTORY_INTERVAL_MS
+      const totalPoints = HISTORY_DURATION_S * pointsPerSec
+
+      ctx!.beginPath()
+      let started = false
+      for (let j = 0; j < hLen; j++) {
+        const idx = (hHead - hLen + j + maxHistoryPoints) % maxHistoryPoints
+        const age = hLen - 1 - j
+        const x = graphRight - (age / totalPoints) * graphW
+        const y = dbToGraphY(buf[idx])
+        if (x < graphLeft) continue
+        if (!started) { ctx!.moveTo(x, y); started = true }
+        else ctx!.lineTo(x, y)
+      }
+
+      ctx!.globalAlpha = alpha
+      ctx!.strokeStyle = strokeColor
+      ctx!.lineWidth = 1.5
+      ctx!.lineJoin = 'round'
+      ctx!.stroke()
+
+      if (started) {
+        ctx!.lineTo(graphRight, graphBottom)
+        ctx!.lineTo(graphRight - ((hLen - 1) / totalPoints) * graphW, graphBottom)
+        ctx!.closePath()
+        ctx!.fillStyle = fillGrad
+        ctx!.fill()
+      }
+      ctx!.globalAlpha = 1
+    }
+
+    function draw() {
+      ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
+      const now = performance.now()
+
+      // Process tracks
+      const pRaw = processTrack(primary, now)
+      let oRaw: { momentaryLufs: number; shortTermLufs: number; integratedLufs: number } | null = null
+      if (other) oRaw = processTrack(other, now)
+
+      // Push history
       if (now - lastHistoryPush > HISTORY_INTERVAL_MS) {
-        history.peak.push(smoothPeakDb)
-        history.rms.push(smoothRmsDb)
-        history.momentary.push(momentaryLufs)
-        history.short.push(shortTermLufs)
-        history.integrated.push(integratedLufs)
-        for (const key of Object.keys(history) as GraphMetric[]) {
-          if (history[key].length > maxHistoryPoints) history[key].shift()
-        }
+        pushHistory(primary, pRaw)
+        if (other && oRaw) pushHistory(other, oRaw)
         lastHistoryPush = now
       }
 
       // ── Draw meters (left side) ──
+      const s = primary
       const meters = [
-        { label: 'PEAK', value: smoothPeakDb, hold: peakHold },
-        { label: 'RMS', value: smoothRmsDb, hold: null },
-        { label: 'M', value: smoothMomentaryLufs, hold: null },
-        { label: 'S', value: smoothShortTermLufs, hold: null },
-        { label: 'I', value: smoothIntegratedLufs, hold: null },
+        { label: 'PEAK', value: s.smoothPeakDb, hold: s.peakHold },
+        { label: 'RMS', value: s.smoothRmsDb, hold: null },
+        { label: 'M', value: s.smoothMomentaryLufs, hold: null },
+        { label: 'S', value: s.smoothShortTermLufs, hold: null },
+        { label: 'I', value: s.smoothIntegratedLufs, hold: null },
       ]
 
       const meterW = 22
@@ -241,7 +454,7 @@ export default function VolumeIndicator({ syncedRef, isPlaying, trackIndex }: Pr
         ctx!.fillStyle = '#ccc'
         ctx!.font = '9px sans-serif'
         ctx!.fillText(
-          meter.value > -59 ? meter.value.toFixed(1) : '-∞',
+          meter.value > -59 ? meter.value.toFixed(1) : '-\u221E',
           x + meterW / 2,
           meterBottom + 22,
         )
@@ -254,7 +467,7 @@ export default function VolumeIndicator({ syncedRef, isPlaying, trackIndex }: Pr
 
       // ── Draw loudness-over-time graph (right side) ──
       const selectedMetric = graphMetricRef.current
-      const selectedHistory = history[selectedMetric]
+      const selectedBuf = primary.historyBufs[selectedMetric]
 
       // Graph background
       ctx!.fillStyle = '#111'
@@ -280,57 +493,31 @@ export default function VolumeIndicator({ syncedRef, isPlaying, trackIndex }: Pr
       ctx!.textAlign = 'center'
       ctx!.font = '8px sans-serif'
       const timeSteps = [0, 5, 10, 15, 20, 25, 30]
-      for (const s of timeSteps) {
-        if (s > HISTORY_DURATION_S) break
-        const x = graphRight - (s / HISTORY_DURATION_S) * graphW
-        ctx!.fillText(s === 0 ? 'now' : `-${s}s`, x, graphBottom + 12)
+      for (const ts of timeSteps) {
+        if (ts > HISTORY_DURATION_S) break
+        const x = graphRight - (ts / HISTORY_DURATION_S) * graphW
+        ctx!.fillText(ts === 0 ? 'now' : `-${ts}s`, x, graphBottom + 12)
       }
 
-      // Draw history line
-      if (selectedHistory.length > 1) {
-        const pointsPerSec = 1000 / HISTORY_INTERVAL_MS
-        const totalPoints = HISTORY_DURATION_S * pointsPerSec
+      // Draw overlay history line (behind)
+      if (showOverlayRef.current && other && other.historyLen > 1) {
+        const oSelectedBuf = other.historyBufs[selectedMetric]
+        drawHistoryLine(oSelectedBuf, other.historyLen, other.historyHead, otherAccentColor, oHistFillGrad, 0.5)
+      }
 
-        ctx!.beginPath()
-        let started = false
-        for (let i = 0; i < selectedHistory.length; i++) {
-          const age = selectedHistory.length - 1 - i
-          const x = graphRight - (age / totalPoints) * graphW
-          const y = dbToGraphY(selectedHistory[i])
-
-          if (x < graphLeft) continue
-          if (!started) {
-            ctx!.moveTo(x, y)
-            started = true
-          } else {
-            ctx!.lineTo(x, y)
-          }
-        }
-        ctx!.strokeStyle = '#cc0000'
-        ctx!.lineWidth = 1.5
-        ctx!.lineJoin = 'round'
-        ctx!.stroke()
-
-        // Fill under
-        if (started) {
-          ctx!.lineTo(graphRight, graphBottom)
-          ctx!.lineTo(graphRight - ((selectedHistory.length - 1) / totalPoints) * graphW, graphBottom)
-          ctx!.closePath()
-          const grad = ctx!.createLinearGradient(0, graphTop, 0, graphBottom)
-          grad.addColorStop(0, 'rgba(204, 0, 0, 0.25)')
-          grad.addColorStop(1, 'rgba(204, 0, 0, 0.02)')
-          ctx!.fillStyle = grad
-          ctx!.fill()
-        }
+      // Draw primary history line
+      if (primary.historyLen > 1) {
+        drawHistoryLine(selectedBuf, primary.historyLen, primary.historyHead, accentColor, histFillGrad, 1)
 
         // Current value label
-        const currentVal = selectedHistory[selectedHistory.length - 1]
+        const newestIdx = (primary.historyHead - 1 + maxHistoryPoints) % maxHistoryPoints
+        const currentVal = selectedBuf[newestIdx]
         const unitSuffix = selectedMetric === 'peak' || selectedMetric === 'rms' ? ' dBFS' : ' LUFS'
-        ctx!.fillStyle = '#cc0000'
+        ctx!.fillStyle = accentColor
         ctx!.font = 'bold 11px sans-serif'
         ctx!.textAlign = 'left'
         ctx!.fillText(
-          currentVal > -59 ? `${currentVal.toFixed(1)}${unitSuffix}` : `-∞${unitSuffix}`,
+          currentVal > -59 ? `${currentVal.toFixed(1)}${unitSuffix}` : `-\u221E${unitSuffix}`,
           graphLeft + 4,
           graphTop + 14,
         )
@@ -355,7 +542,7 @@ export default function VolumeIndicator({ syncedRef, isPlaying, trackIndex }: Pr
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
-  }, [syncedRef, isPlaying, trackIndex])
+  }, [syncedRef, isPlaying, trackIndex, accentColor, otherAccentColor, showOverlay])
 
   return (
     <div className="analyzer-panel analyzer-panel-wide">

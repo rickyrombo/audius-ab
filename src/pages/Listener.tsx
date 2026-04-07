@@ -7,8 +7,22 @@ import { useSyncedWaveforms } from '../hooks/useSyncedWaveforms'
 import SpectrumAnalyzer from '../components/SpectrumAnalyzer'
 import SpaceAnalyzer from '../components/SpaceAnalyzer'
 import VolumeIndicator from '../components/VolumeIndicator'
+import RGBWaveform from '../components/RGBWaveform'
+import ZoomedWaveform from '../components/ZoomedWaveform'
 
 const LABELS = ['A', 'B']
+
+function AvatarImg({ src, mirrors, alt }: { src: string; mirrors: string[]; alt: string }) {
+  const tryMirror = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget
+    const tried = parseInt(img.dataset.mirrorIdx ?? '0', 10)
+    if (tried < mirrors.length) {
+      img.dataset.mirrorIdx = String(tried + 1)
+      img.src = mirrors[tried]
+    }
+  }
+  return <img src={src} alt={alt} onError={tryMirror} />
+}
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -18,7 +32,9 @@ function formatTime(seconds: number): string {
 
 interface TrackInfo {
   id: string
+  userId: string
   title: string
+  artist: string
   streamUrl: string
 }
 
@@ -26,6 +42,8 @@ interface CommentDisplay {
   id: string
   userId: string
   handle: string
+  avatarUrl: string
+  avatarMirrors: string[]
   body: string
   timestampSeconds: number
 }
@@ -49,8 +67,9 @@ export default function Listener() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [currentUserHandle, setCurrentUserHandle] = useState<string | null>(null)
   const [showHelp, setShowHelp] = useState(false)
+  const [showOverlay, setShowOverlay] = useState(false)
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null)
 
-  const containerRefs = useRef<(HTMLDivElement | null)[]>([])
   const commentTextareaRefs = useRef<(HTMLTextAreaElement | null)[]>([])
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const skipFocusTimeRef = useRef(false)
@@ -64,14 +83,35 @@ export default function Listener() {
         const resp = await sdk.tracks.getTrackComments({ trackId: t.id })
         const items = resp.data ?? []
         const users = resp.related?.users ?? []
-        const handleMap = new Map(users.map((u) => [u.id, u.handle]))
-        return items.map((c) => ({
-          id: c.id,
-          userId: c.userId ?? '',
-          handle: (c.userId && handleMap.get(c.userId)) ?? c.userId ?? 'anon',
-          body: c.message,
-          timestampSeconds: c.trackTimestampS ?? 0,
-        }))
+        const userMap = new Map(users.map((u: any) => [u.id, u]))
+        return items.map((c) => {
+          const user = c.userId ? userMap.get(c.userId) : null
+          const pic = user?.profilePicture ?? user?.avatar
+          let primaryUrl = ''
+          let mirrorUrls: string[] = []
+          if (typeof pic === 'string') {
+            primaryUrl = pic
+          } else if (pic) {
+            // Keys are _150x150, _480x480, _1000x1000
+            primaryUrl = pic._150x150 ?? pic._480x480 ?? pic._1000x1000 ?? ''
+            // Mirrors are host prefixes — construct full URLs from the primary path
+            if (primaryUrl && Array.isArray(pic.mirrors)) {
+              try {
+                const path = new URL(primaryUrl).pathname
+                mirrorUrls = pic.mirrors.map((host: string) => `${host.replace(/\/$/, '')}${path}`)
+              } catch { /* ignore */ }
+            }
+          }
+          return {
+            id: c.id,
+            userId: c.userId ?? '',
+            handle: user?.handle ?? c.userId ?? 'anon',
+            avatarUrl: primaryUrl,
+            avatarMirrors: mirrorUrls,
+            body: c.message,
+            timestampSeconds: c.trackTimestampS ?? 0,
+          }
+        })
       },
       enabled: !!t.id,
       staleTime: Infinity,
@@ -86,9 +126,10 @@ export default function Listener() {
   })
 
   const streamUrls = tracks.map((t) => t.streamUrl)
+  const trackIds = tracks.map((t) => t.id)
 
-  const { isReady, currentTime, duration, trackDurations, play, pause, seek, setActive, syncedRef } =
-    useSyncedWaveforms(containerRefs, streamUrls, (time) => {
+  const { isReady, currentTime, duration, trackDurations, colorData, bpms, play, pause, seek, setActive, syncedRef } =
+    useSyncedWaveforms(streamUrls, trackIds, (time) => {
       setCommentTime(time)
     }, () => {
       setIsPlaying(false)
@@ -129,7 +170,9 @@ export default function Listener() {
             if (!t) return null
             return {
               id: t.id,
+              userId: t.user?.id ?? '',
               title: t.title,
+              artist: t.user?.name || t.user?.handle || '',
               streamUrl: t.stream?.url ?? t.stream?.mirrors?.[0] ?? '',
             }
           })
@@ -164,10 +207,6 @@ export default function Listener() {
     }).catch(() => {})
   }, [])
 
-  // Keep containerRefs array sized correctly when tracks load
-  useEffect(() => {
-    containerRefs.current = containerRefs.current.slice(0, tracks.length)
-  }, [tracks.length])
 
   // Refs for hotkey handlers to avoid stale closures
   const activeIndexRef = useRef(activeIndex)
@@ -182,32 +221,46 @@ export default function Listener() {
   seekRef.current = seek
   const playRef = useRef(play)
   playRef.current = play
+  const bpmsRef = useRef(bpms)
+  bpmsRef.current = bpms
   const pauseRef = useRef(pause)
   pauseRef.current = pause
 
   // Hotkeys
   useEffect(() => {
-    const NUDGE_SECS = 5
+    const FINE_NUDGE_SECS = 0.5
+
+    /** 4 beats in seconds based on active track's BPM */
+    function fourBeatsSecs(): number {
+      const bpm = bpmsRef.current[activeIndexRef.current] || 120
+      return (60 / bpm) * 4
+    }
     const FF_INTERVAL_MS = 80
-    const FF_SECS_PER_TICK = 3
+    const FF_SECS_PER_TICK = 0.5
     const HOLD_THRESHOLD_MS = 300
     let holdTimer: ReturnType<typeof setTimeout> | null = null
     let ffInterval: ReturnType<typeof setInterval> | null = null
     let didHold = false
+    let wasShiftSeek = false
 
     function seekRelative(deltaSecs: number) {
       const dur = durationRef.current
       if (dur <= 0) return
-      const cur = currentTimeRef.current
+      // Read real-time position from audio engine, not throttled React state
+      const cur = syncedRef.current?.getCurrentTime() ?? currentTimeRef.current
       const newTime = Math.max(0, Math.min(dur, cur + deltaSecs))
       seekRef.current?.(newTime / dur)
     }
+
+    const FF_SHIFT_MULTIPLIER = 4
+    let shiftHeld = false
 
     function startFastSeek(dir: number) {
       if (ffInterval) return
       didHold = true
       ffInterval = setInterval(() => {
-        seekRelative(dir * FF_SECS_PER_TICK)
+        const base = FF_SECS_PER_TICK
+        seekRelative(dir * base * (shiftHeld ? FF_SHIFT_MULTIPLIER : 1))
       }, FF_INTERVAL_MS)
     }
 
@@ -217,6 +270,7 @@ export default function Listener() {
     }
 
     function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Shift') { shiftHeld = true; return }
       if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return
 
       if (e.key === ' ') {
@@ -261,27 +315,31 @@ export default function Listener() {
 
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault()
-        if (e.repeat) return
         const dir = e.key === 'ArrowRight' ? 1 : -1
+        if (e.repeat) return
         didHold = false
+        wasShiftSeek = e.shiftKey
+        shiftHeld = e.shiftKey
         holdTimer = setTimeout(() => startFastSeek(dir), HOLD_THRESHOLD_MS)
         return
       }
     }
 
     function handleKeyUp(e: KeyboardEvent) {
+      if (e.key === 'Shift') { shiftHeld = false; return }
       if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         const dir = e.key === 'ArrowRight' ? 1 : -1
         stopFastSeek()
         if (!didHold) {
-          seekRelative(dir * NUDGE_SECS)
-          if (!isPlayingRef.current) {
-            playRef.current?.()
-            setIsPlaying(true)
+          if (wasShiftSeek) {
+            seekRelative(dir * fourBeatsSecs())
+          } else {
+            seekRelative(dir * FINE_NUDGE_SECS)
           }
         }
         didHold = false
+        wasShiftSeek = false
       }
     }
 
@@ -301,6 +359,8 @@ export default function Listener() {
   }
 
   function renderCommentForm(i: number) {
+    // Only allow comments on tracks owned by the playlist creator
+    if (!ownerId || !tracks[i] || tracks[i].userId !== ownerId) return null
     return (
       <div className="comment-form">
         <textarea
@@ -376,6 +436,14 @@ export default function Listener() {
     if (user?.id) setCurrentUserId(user.id)
     if (user?.handle) setCurrentUserHandle(user.handle)
     return user
+  }
+
+  function scrollToComment(commentId: string) {
+    const el = document.getElementById(`comment-${commentId}`)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlightedCommentId(commentId)
+    setTimeout(() => setHighlightedCommentId(null), 2000)
   }
 
   async function handleFavorite(trackId: string) {
@@ -488,112 +556,217 @@ export default function Listener() {
         </div>
       )}
 
+      {/* Analyzer overlay toggle */}
+      {tracks.length > 1 && (
+        <div className="analyzer-overlay-bar">
+          <button
+            type="button"
+            className={`overlay-toggle${showOverlay ? ' active' : ''}`}
+            onClick={() => setShowOverlay(v => !v)}
+          >
+            A/B Overlay
+          </button>
+        </div>
+      )}
+
       {/* Track A Analyzers */}
-      <div className="analyzers-row">
-        <SpectrumAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} />
-        <SpaceAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} />
-        <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} />
+      <div className="analyzers-row track-a">
+        <SpectrumAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} accentColor="#e06030" otherAccentColor="#3080e0" showOverlay={showOverlay} />
+        <SpaceAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} accentColor="#e06030" otherAccentColor="#3080e0" showOverlay={showOverlay} />
+        <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={0} accentColor="#e06030" otherAccentColor="#3080e0" showOverlay={showOverlay} />
       </div>
 
       {/* Waveform area */}
       <div className="waveform-area">
-
         <div className="waveform-area-center">
-          {/* Track rows */}
-          <div className="track-rows">
-            {tracks.map((track, i) => (
-              <div key={track.id}>
-                {/* Comment input above track A */}
-                {i === 0 && renderCommentForm(i)}
-                {i === 0 && (
-                  <div className="waveform-time-row">
-                    <span className="time-display">
-                      {formatTime(Math.min(currentTime, trackDurations[0] ?? duration))} / {formatTime(trackDurations[0] ?? duration)}
-                    </span>
-                  </div>
-                )}
 
-                <div
-                  className={`waveform-row${activeIndex === i ? ' active' : ''}`}
-                >
+          {/* Track A */}
+          {tracks.length > 0 && (
+            <div className="waveform-track-group">
+              {renderCommentForm(0)}
+              <div className="waveform-time-row">
+                <div className="comment-avatars-strip">
+                  {(allComments[0] ?? []).map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="comment-avatar-marker"
+                      style={{ left: duration > 0 ? `${(c.timestampSeconds / duration) * 100}%` : '0%' }}
+                      title={`@${c.handle}: ${c.body}`}
+                      onClick={() => scrollToComment(c.id)}
+                    >
+                      {c.avatarUrl ? <AvatarImg src={c.avatarUrl} mirrors={c.avatarMirrors} alt="" /> : <span className="comment-avatar-fallback">{c.handle[0]?.toUpperCase()}</span>}
+                    </button>
+                  ))}
+                </div>
+                <span className="time-display">
+                  {formatTime(Math.min(currentTime, trackDurations[0] ?? duration))} / {formatTime(trackDurations[0] ?? duration)}
+                </span>
+              </div>
+              <div className={`waveform-row track-a${activeIndex === 0 ? ' active' : ''}`}>
                 {tracks.length > 1 && (
                   <button
                     type="button"
-                    className={`track-toggle-btn${activeIndex === i ? ' active' : ''}`}
-                    onClick={() => handleToggleTrack(i)}
-                    title={`Listen to ${track.title || `track ${LABELS[i]}`}`}
+                    className={`track-toggle-btn track-a${activeIndex === 0 ? ' active' : ''}`}
+                    onClick={() => handleToggleTrack(0)}
+                    title={`Listen to ${tracks[0].title || 'track A'}`}
                   >
-                    {LABELS[i]}
+                    A
                   </button>
                 )}
-                <div
-                  ref={(el) => { containerRefs.current[i] = el }}
-                  className="waveform-container"
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const progress = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+                <RGBWaveform
+                  syncedRef={syncedRef}
+                  colorData={colorData[0] ?? null}
+                  duration={duration}
+                  trackDuration={trackDurations[0] ?? duration}
+                  isActive={activeIndex === 0}
+                  activeColor="#e06030"
+                  onClick={(progress) => {
                     if (clickTimerRef.current) clearTimeout(clickTimerRef.current)
                     clickTimerRef.current = setTimeout(() => {
                       clickTimerRef.current = null
-                      handleToggleTrack(i)
+                      handleToggleTrack(0)
                       if (duration > 0) seek(progress)
                     }, 250)
                   }}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation()
+                  onDoubleClick={(progress) => {
                     if (clickTimerRef.current) {
                       clearTimeout(clickTimerRef.current)
                       clickTimerRef.current = null
                     }
-                    handleToggleTrack(i)
-                    const rect = e.currentTarget.getBoundingClientRect()
-                    const progress = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-                    setCommentTime(progress * duration)
-                    skipFocusTimeRef.current = true
-                    commentTextareaRefs.current[i]?.focus()
+                    handleToggleTrack(0)
+                    if (ownerId && tracks[0]?.userId === ownerId) {
+                      setCommentTime(progress * duration)
+                      skipFocusTimeRef.current = true
+                      commentTextareaRefs.current[0]?.focus()
+                    }
                   }}
                 >
-                  {/* Pending comment marker */}
                   <div
                     className="comment-marker pending"
                     style={{
                       left: duration > 0 && commentTime !== null ? `${(commentTime / duration) * 100}%` : '0%',
-                      display: commentTime !== null && commentTrackIdx === i ? undefined : 'none',
+                      display: commentTime !== null && commentTrackIdx === 0 ? undefined : 'none',
                     }}
+                  />
+                </RGBWaveform>
+                <div className="waveform-container waveform-zoomed-side">
+                  <ZoomedWaveform
+                    syncedRef={syncedRef}
+                    colorData={colorData[0] ?? null}
+                    trackIndex={0}
                   />
                 </div>
                 <button
                   type="button"
-                  className={`btn-favorite${favorited.has(track.id) ? ' favorited' : ''}`}
-                  onClick={() => handleFavorite(track.id)}
+                  className={`btn-favorite${favorited.has(tracks[0].id) ? ' favorited' : ''}`}
+                  onClick={() => handleFavorite(tracks[0].id)}
                   title="Favorite this track"
                 >
                   ♥
                 </button>
               </div>
+            </div>
+          )}
 
-                {/* Time display below track B */}
-                {i === 1 && trackDurations.length > 1 && (
-                  <div className="waveform-time-row">
-                    <span className="time-display">
-                      {formatTime(Math.min(currentTime, trackDurations[1]))} / {formatTime(trackDurations[1])}
-                    </span>
-                  </div>
+          {/* Track B */}
+          {tracks.length > 1 && (
+            <div className="waveform-track-group">
+              <div className={`waveform-row track-b${activeIndex === 1 ? ' active' : ''}`}>
+                {tracks.length > 1 && (
+                  <button
+                    type="button"
+                    className={`track-toggle-btn track-b${activeIndex === 1 ? ' active' : ''}`}
+                    onClick={() => handleToggleTrack(1)}
+                    title={`Listen to ${tracks[1].title || 'track B'}`}
+                  >
+                    B
+                  </button>
                 )}
-                {/* Comment input below track B */}
-                {i === 1 && renderCommentForm(i)}
+                <RGBWaveform
+                  syncedRef={syncedRef}
+                  colorData={colorData[1] ?? null}
+                  duration={duration}
+                  trackDuration={trackDurations[1] ?? duration}
+                  isActive={activeIndex === 1}
+                  activeColor="#3080e0"
+                  onClick={(progress) => {
+                    if (clickTimerRef.current) clearTimeout(clickTimerRef.current)
+                    clickTimerRef.current = setTimeout(() => {
+                      clickTimerRef.current = null
+                      handleToggleTrack(1)
+                      if (duration > 0) seek(progress)
+                    }, 250)
+                  }}
+                  onDoubleClick={(progress) => {
+                    if (clickTimerRef.current) {
+                      clearTimeout(clickTimerRef.current)
+                      clickTimerRef.current = null
+                    }
+                    handleToggleTrack(1)
+                    if (ownerId && tracks[1]?.userId === ownerId) {
+                      setCommentTime(progress * duration)
+                      skipFocusTimeRef.current = true
+                      commentTextareaRefs.current[1]?.focus()
+                    }
+                  }}
+                >
+                  <div
+                    className="comment-marker pending"
+                    style={{
+                      left: duration > 0 && commentTime !== null ? `${(commentTime / duration) * 100}%` : '0%',
+                      display: commentTime !== null && commentTrackIdx === 1 ? undefined : 'none',
+                    }}
+                  />
+                </RGBWaveform>
+                <div className="waveform-container waveform-zoomed-side">
+                  <ZoomedWaveform
+                    syncedRef={syncedRef}
+                    colorData={colorData[1] ?? null}
+                    trackIndex={1}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className={`btn-favorite${favorited.has(tracks[1].id) ? ' favorited' : ''}`}
+                  onClick={() => handleFavorite(tracks[1].id)}
+                  title="Favorite this track"
+                >
+                  ♥
+                </button>
               </div>
-            ))}
-          </div>
+              <div className="waveform-time-row">
+                <div className="comment-avatars-strip">
+                  {(allComments[1] ?? []).map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="comment-avatar-marker"
+                      style={{ left: duration > 0 ? `${(c.timestampSeconds / duration) * 100}%` : '0%' }}
+                      title={`@${c.handle}: ${c.body}`}
+                      onClick={() => scrollToComment(c.id)}
+                    >
+                      {c.avatarUrl ? <AvatarImg src={c.avatarUrl} mirrors={c.avatarMirrors} alt="" /> : <span className="comment-avatar-fallback">{c.handle[0]?.toUpperCase()}</span>}
+                    </button>
+                  ))}
+                </div>
+                <span className="time-display">
+                  {formatTime(Math.min(currentTime, trackDurations[1]))} / {formatTime(trackDurations[1])}
+                </span>
+              </div>
+              {renderCommentForm(1)}
+            </div>
+          )}
+
         </div>
       </div>
 
       {/* Track B Analyzers */}
       {tracks.length > 1 && (
-        <div className="analyzers-row">
-          <SpectrumAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} />
-          <SpaceAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} />
-          <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} />
+        <div className="analyzers-row track-b">
+          <SpectrumAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} accentColor="#3080e0" otherAccentColor="#e06030" showOverlay={showOverlay} />
+          <SpaceAnalyzer syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} accentColor="#3080e0" otherAccentColor="#e06030" showOverlay={showOverlay} />
+          <VolumeIndicator syncedRef={syncedRef} isPlaying={isPlaying} trackIndex={1} accentColor="#3080e0" otherAccentColor="#e06030" showOverlay={showOverlay} />
         </div>
       )}
 
@@ -613,7 +786,7 @@ export default function Listener() {
                     <p className="empty-comments">No comments yet.</p>
                   )}
                   {comments.map((c) => (
-                    <div className="comment-item" key={c.id}>
+                    <div className={`comment-item${highlightedCommentId === c.id ? ' highlighted' : ''}`} id={`comment-${c.id}`} key={c.id}>
                       <div className="comment-meta">
                         <span className="comment-timestamp" role="button" onClick={() => {
                           if (duration > 0) {
@@ -644,14 +817,18 @@ export default function Listener() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <button type="button" className="modal-close" onClick={() => setShowHelp(false)}>✕</button>
             <h2>Audius AB</h2>
-            <p>Compare two tracks side-by-side. Listen, analyze, and leave timestamped comments.</p>
+            <p>Compare two tracks side-by-side with real-time audio analysis. Listen, analyze, and leave timestamped comments.</p>
 
             <h3>How to use</h3>
             <ul>
               <li>Press play or hit <kbd>Space</kbd> to start playback</li>
-              <li>Click a waveform to seek; click the other track's waveform to switch</li>
-              <li>Double-click a waveform to set a comment timestamp and focus the input</li>
-              <li>Use the analyzers (spectrum, stereo field, loudness) to compare tracks</li>
+              <li>Click a waveform to seek; click the other track's waveform to switch &amp; seek</li>
+              <li>Hover over a waveform to preview the seek position</li>
+              <li>Double-click a waveform to set a comment timestamp</li>
+              <li>Click a commenter's avatar on the waveform timeline to jump to their comment</li>
+              <li>Toggle <strong>A/B Overlay</strong> to compare both tracks' analysis side-by-side</li>
+              <li>Hover over the spectrum analyzer to see frequency, note, and dB at the cursor</li>
+              <li>Use the analyzers to compare spectrum, stereo field (polar/Lissajous), and loudness (LUFS/peak/RMS)</li>
               <li>Log in with Audius to leave comments and favorite tracks</li>
             </ul>
 
@@ -661,7 +838,7 @@ export default function Listener() {
                 <tr><td><kbd>Space</kbd></td><td>Play / Pause</td></tr>
                 <tr><td><kbd>1</kbd> / <kbd>2</kbd></td><td>Switch to track A / B</td></tr>
                 <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Switch track</td></tr>
-                <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Seek ±5s (hold to fast-seek)</td></tr>
+                <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Nudge ±0.5s; hold to fast-seek; <kbd>Shift</kbd> for 4-beat jumps</td></tr>
                 <tr><td><kbd>C</kbd></td><td>Focus comment input at current time</td></tr>
                 <tr><td><kbd>Enter</kbd></td><td>Submit comment</td></tr>
                 <tr><td><kbd>Shift+Enter</kbd></td><td>New line in comment</td></tr>

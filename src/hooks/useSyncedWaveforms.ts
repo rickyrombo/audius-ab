@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { SyncedWaveforms } from "../lib/waveforms";
+import type { WaveformColorData } from "../lib/waveformAnalysis";
 
 export function useSyncedWaveforms(
-  containerRefs: React.MutableRefObject<(HTMLDivElement | null)[]>,
   streamUrls: string[],
+  trackIds: string[],
   onSeekWhilePaused?: (time: number) => void,
   onFinish?: () => void,
 ) {
@@ -12,6 +13,8 @@ export function useSyncedWaveforms(
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [trackDurations, setTrackDurations] = useState<number[]>([]);
+  const [colorData, setColorData] = useState<(WaveformColorData | null)[]>([]);
+  const [bpms, setBpms] = useState<number[]>([]);
   const seekWhilePausedRef = useRef(onSeekWhilePaused);
   seekWhilePausedRef.current = onSeekWhilePaused;
   const finishRef = useRef(onFinish);
@@ -21,25 +24,32 @@ export function useSyncedWaveforms(
 
   useEffect(() => {
     if (!streamUrls.length) return;
-    const containers = containerRefs.current.filter(
-      (el): el is HTMLDivElement => el !== null,
-    );
-    if (containers.length !== streamUrls.length) return;
 
-    const synced = new SyncedWaveforms(containers);
+    const synced = new SyncedWaveforms();
     syncedRef.current = synced;
     setIsReady(false);
     setCurrentTime(0);
     setDuration(0);
+    setColorData([]);
+    setBpms([]);
 
     synced.onReady(() => {
       setIsReady(true);
       setDuration(synced.getDuration());
       setTrackDurations(synced.getTrackDurations());
+      setColorData(streamUrls.map((_, i) => synced.getColorData(i)));
+      const detectedBpms = streamUrls.map((_, i) => synced.getBPM(i));
+      setBpms(detectedBpms);
+      console.log('[BPM]', detectedBpms.map((bpm, i) => `Track ${i}: ${bpm} BPM`).join(', '));
     });
+    let lastStateUpdate = 0;
     synced.onTimeUpdate((t, d) => {
-      setCurrentTime(t);
-      setDuration(d);
+      const now = performance.now();
+      if (now - lastStateUpdate > 250) {
+        lastStateUpdate = now;
+        setCurrentTime(t);
+        setDuration(d);
+      }
     });
     synced.onSeekWhilePaused((t) => {
       seekWhilePausedRef.current?.(t);
@@ -47,7 +57,7 @@ export function useSyncedWaveforms(
     synced.onFinish(() => {
       finishRef.current?.();
     });
-    synced.load(streamUrls);
+    synced.load(streamUrls, trackIds);
 
     return () => {
       synced.destroy();
@@ -61,6 +71,8 @@ export function useSyncedWaveforms(
     currentTime,
     duration,
     trackDurations,
+    colorData,
+    bpms,
     play: () => syncedRef.current?.play(),
     pause: () => syncedRef.current?.pause(),
     seek: (progress: number) => syncedRef.current?.seek(progress),

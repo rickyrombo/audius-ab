@@ -1,4 +1,5 @@
-import WaveSurfer from "wavesurfer.js";
+import { analyzeWaveformColors, detectBPM, type WaveformColorData } from "./waveformAnalysis";
+import { getCachedAudio, setCachedAudio, getCachedWaveform, setCachedWaveform } from "./audioCache";
 
 type ReadyCallback = () => void;
 type TimeUpdateCallback = (time: number, duration: number) => void;
@@ -6,11 +7,11 @@ type SeekCallback = (time: number) => void;
 
 export class SyncedWaveforms {
   private audioCtx: AudioContext;
-  private containers: HTMLElement[];
   private audioBuffers: AudioBuffer[] = [];
+  private colorData: WaveformColorData[] = [];
+  private bpms: number[] = [];
   private gainNodes: GainNode[] = [];
   private sources: AudioBufferSourceNode[] = [];
-  private wavesurfers: WaveSurfer[] = [];
   private activeIndex = 0;
   private isPlaying = false;
   private startContextTime = 0;
@@ -34,10 +35,13 @@ export class SyncedWaveforms {
   private trackSplitters: ChannelSplitterNode[] = [];
   private trackAnalysersL: AnalyserNode[] = [];
   private trackAnalysersR: AnalyserNode[] = [];
+  // K-weighted analysers for true LUFS measurement (ITU-R BS.1770)
+  private trackKWeightedAnalysers: AnalyserNode[] = [];
+  private kWeightShelf: BiquadFilterNode[] = [];
+  private kWeightHP: BiquadFilterNode[] = [];
   private silentGain: GainNode;
 
-  constructor(containers: HTMLElement[]) {
-    this.containers = containers;
+  constructor() {
     this.audioCtx = new AudioContext();
 
     // Main analyser on the summed output
@@ -68,14 +72,19 @@ export class SyncedWaveforms {
     this.silentGain.connect(this.audioCtx.destination);
   }
 
-  async load(streamUrls: string[]): Promise<void> {
+  async load(streamUrls: string[], trackIds: string[]): Promise<void> {
     if (this.destroyed) return;
 
-    // Fetch + decode all tracks in parallel
+    // Fetch + decode all tracks in parallel (with cache by track ID)
     const buffers = await Promise.all(
-      streamUrls.map(async (url) => {
-        const resp = await fetch(url);
-        const ab = await resp.arrayBuffer();
+      streamUrls.map(async (url, i) => {
+        const cacheKey = trackIds[i];
+        let ab = await getCachedAudio(cacheKey);
+        if (!ab) {
+          const resp = await fetch(url);
+          ab = await resp.arrayBuffer();
+          setCachedAudio(cacheKey, ab.slice(0));
+        }
         return this.audioCtx.decodeAudioData(ab);
       }),
     );
@@ -113,45 +122,61 @@ export class SyncedWaveforms {
       return a;
     });
 
+    // K-weighted analysers for LUFS (ITU-R BS.1770 K-weighting)
+    // Stage 1: High-shelf boost (+4dB above ~1.5kHz) — models head/ear acoustics
+    // Stage 2: High-pass (RLB weighting) — rolls off below ~60Hz
+    this.kWeightShelf = buffers.map(() => {
+      const f = this.audioCtx.createBiquadFilter();
+      f.type = 'highshelf';
+      f.frequency.value = 1681.974;  // ITU-R BS.1770 specified
+      f.gain.value = 3.999;          // +4dB
+      f.Q.value = 0.7071;
+      return f;
+    });
+    this.kWeightHP = buffers.map(() => {
+      const f = this.audioCtx.createBiquadFilter();
+      f.type = 'highpass';
+      f.frequency.value = 38.135;    // ITU-R BS.1770 RLB weighting
+      f.Q.value = 0.5003;
+      return f;
+    });
+    this.trackKWeightedAnalysers = buffers.map(() => {
+      const a = this.audioCtx.createAnalyser();
+      a.fftSize = 2048;
+      a.smoothingTimeConstant = 0;  // No smoothing — we need raw samples
+      return a;
+    });
+
     // Wire per-track analysis: trackAnalyser -> splitter -> L/R analysers -> silentGain
+    //                          trackAnalyser -> shelf -> HP -> kWeightedAnalyser -> silentGain
     for (let i = 0; i < buffers.length; i++) {
       this.trackAnalysers[i].connect(this.trackSplitters[i]);
       this.trackSplitters[i].connect(this.trackAnalysersL[i], 0);
       this.trackSplitters[i].connect(this.trackAnalysersR[i], 1);
       this.trackAnalysersL[i].connect(this.silentGain);
       this.trackAnalysersR[i].connect(this.silentGain);
+
+      // K-weighted chain
+      this.trackAnalysers[i].connect(this.kWeightShelf[i]);
+      this.kWeightShelf[i].connect(this.kWeightHP[i]);
+      this.kWeightHP[i].connect(this.trackKWeightedAnalysers[i]);
+      this.trackKWeightedAnalysers[i].connect(this.silentGain);
     }
 
-    // Create WaveSurfer instances (visualization only)
-    const maxDuration = Math.max(...buffers.map((b) => b.duration));
-    const totalBars = 1600;
-    this.wavesurfers = buffers.map((buf, i) => {
-      const rawPeaks = this._computePeaks(buf, totalBars);
-      // Pad shorter tracks with zeros so waveform width is proportional to duration
-      const ratio = buf.duration / maxDuration;
-      const activeBars = Math.round(totalBars * ratio);
-      const scaledPeaks = new Array(totalBars).fill(0);
-      for (let j = 0; j < activeBars; j++) {
-        scaledPeaks[j] =
-          rawPeaks[Math.round((j * rawPeaks.length) / activeBars)] ?? 0;
-      }
-      const ws = WaveSurfer.create({
-        container: this.containers[i],
-        waveColor: "#444",
-        progressColor: "#cc0000",
-        cursorColor: "#cc0000",
-        cursorWidth: 2,
-        height: "auto",
-        barWidth: 1,
-        barGap: 1,
-        barRadius: 1,
-        interact: false,
-        peaks: [scaledPeaks],
-        duration: maxDuration,
-      });
+    // Analyze waveform colors for each track (with cache by track ID)
+    this.colorData = await Promise.all(
+      buffers.map(async (buf, i) => {
+        const cacheKey = trackIds[i];
+        const cached = await getCachedWaveform(cacheKey);
+        if (cached) return cached;
+        const data = analyzeWaveformColors(buf);
+        setCachedWaveform(cacheKey, data);
+        return data;
+      }),
+    );
 
-      return ws;
-    });
+    // BPM detection for each track
+    this.bpms = buffers.map((buf) => detectBPM(buf));
 
     this.readyCb?.();
   }
@@ -162,7 +187,6 @@ export class SyncedWaveforms {
     const dur = this.getDuration();
     if (dur > 0 && this.startOffset >= dur) {
       this.startOffset = 0;
-      this.wavesurfers.forEach((ws) => ws.seekTo(0));
     }
     if (this.audioCtx.state === "suspended") {
       this.audioCtx.resume();
@@ -192,11 +216,6 @@ export class SyncedWaveforms {
     }
 
     this.startOffset = offset;
-
-    // Update all WaveSurfer playheads
-    this.wavesurfers.forEach((ws) => {
-      ws.seekTo(progress);
-    });
 
     if (wasPlaying) {
       if (this.audioCtx.state === "suspended") {
@@ -257,8 +276,26 @@ export class SyncedWaveforms {
     return this.trackAnalysersR[i];
   }
 
+  getTrackKWeightedAnalyser(i: number): AnalyserNode {
+    return this.trackKWeightedAnalysers[i];
+  }
+
   getSampleRate(): number {
     return this.audioCtx.sampleRate;
+  }
+
+  getColorData(i: number): WaveformColorData | null {
+    return this.colorData[i] ?? null;
+  }
+
+  getBPM(i: number): number {
+    return this.bpms[i] ?? 120;
+  }
+
+  getProgress(): number {
+    const dur = this.getDuration();
+    if (dur <= 0) return 0;
+    return Math.min(this._getCurrentTime() / dur, 1);
   }
 
   onReady(cb: ReadyCallback): void {
@@ -281,13 +318,6 @@ export class SyncedWaveforms {
     this.destroyed = true;
     this._stopRaf();
     this._stopSources();
-    this.wavesurfers.forEach((ws) => {
-      try {
-        ws.destroy();
-      } catch {
-        /* ignore */
-      }
-    });
     try {
       this.audioCtx.close();
     } catch {
@@ -295,11 +325,15 @@ export class SyncedWaveforms {
     }
     this.gainNodes = [];
     this.audioBuffers = [];
-    this.wavesurfers = [];
+    this.colorData = [];
+    this.bpms = [];
     this.trackAnalysers = [];
     this.trackSplitters = [];
     this.trackAnalysersL = [];
     this.trackAnalysersR = [];
+    this.trackKWeightedAnalysers = [];
+    this.kWeightShelf = [];
+    this.kWeightHP = [];
   }
 
   // ── Private ──────────────────────────────────────────────────────────────
@@ -333,8 +367,7 @@ export class SyncedWaveforms {
           this.startOffset = this.getDuration();
           this.isPlaying = false;
           this._stopRaf();
-          // Update waveform cursors to end
-          this.wavesurfers.forEach((ws) => ws.seekTo(1));
+          this.timeUpdateCb?.(this.startOffset, this.getDuration());
           this.finishCb?.();
         }
       };
@@ -359,12 +392,6 @@ export class SyncedWaveforms {
       if (!this.isPlaying || this.destroyed) return;
       const t = this._getCurrentTime();
       const duration = this.getDuration();
-      if (duration > 0) {
-        const progress = t / duration;
-        this.wavesurfers.forEach((ws) => {
-          ws.seekTo(Math.min(progress, 1));
-        });
-      }
       this.timeUpdateCb?.(t, duration);
       this.rafId = requestAnimationFrame(tick);
     };
@@ -378,26 +405,4 @@ export class SyncedWaveforms {
     }
   }
 
-  private _computePeaks(buffer: AudioBuffer, length: number): number[] {
-    const channels = buffer.numberOfChannels;
-    const totalSamples = buffer.length;
-    const samplesPerPeak = Math.floor(totalSamples / length);
-    const peaks: number[] = new Array(length).fill(0);
-
-    for (let ch = 0; ch < channels; ch++) {
-      const data = buffer.getChannelData(ch);
-      for (let i = 0; i < length; i++) {
-        let max = 0;
-        const start = i * samplesPerPeak;
-        const end = Math.min(start + samplesPerPeak, totalSamples);
-        for (let j = start; j < end; j++) {
-          const abs = Math.abs(data[j]);
-          if (abs > max) max = abs;
-        }
-        if (max > peaks[i]) peaks[i] = max;
-      }
-    }
-
-    return peaks;
-  }
 }

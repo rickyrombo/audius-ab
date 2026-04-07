@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { getSDK } from "../lib/audius";
 import { useSyncedWaveforms } from "../hooks/useSyncedWaveforms";
 import { useAuth } from "../hooks/useAuth";
@@ -174,7 +174,7 @@ export default function Listener() {
         if (!playlist) throw new Error("Playlist not found");
         if (cancelled) return;
 
-        setDescription(playlist.description ?? "");
+        setDescription((playlist.description ?? "").replace(/Made with Audius A\/B/g, "").trim());
         if (playlist.user?.id) setOwnerId(playlist.user.id);
 
         // Get track IDs from playlist_contents
@@ -549,7 +549,7 @@ export default function Listener() {
             </button>
             {currentUserHandle ? (
               <>
-                <span className="user-handle-text">@{currentUserHandle}</span>
+                <Link to="/projects" className="user-handle-text">@{currentUserHandle}</Link>
                 <button
                   type="button"
                   className="btn-header btn-logout"

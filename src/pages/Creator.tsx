@@ -1,5 +1,5 @@
 import { useState, useRef, useId } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import { getSDK } from '../lib/audius'
 
@@ -104,7 +104,7 @@ export default function Creator() {
         userId: user.id,
         metadata: {
           playlistName: playlistName.trim() || defaultName,
-          description: question.trim() || undefined,
+          description: (question.trim() ? question.trim() + '\n' : '') + 'Made with Audius A/B',
           isPrivate: true,
           playlistContents: trackIds.map((id) => ({ trackId: id, timestamp: now })),
         },
@@ -172,6 +172,7 @@ export default function Creator() {
         <p>Upload 1–2 tracks and get a private link you can share that makes it easy for listeners to give feedback and compare your tracks.</p>
         <p>Ideal for A/B testing two versions of a track. Use it to get feedback on two different masters, a change in the mix, or a tweak of an element of your track.</p>
         <p>Examples: <a href="/analyze/EJmKJXo" target="_blank" rel="noopener noreferrer">Single Track Feedback</a> | <a href="/analyze/qz2gQwo" target="_blank" rel="noopener noreferrer">A/B Test</a></p>
+        <p><Link to="/projects">My Projects</Link></p>
       </div>
 
       <div className="creator-slots">

@@ -470,7 +470,7 @@ export default function Listener() {
             <button
               type="button"
               className="btn-header btn-login"
-              onClick={() => navigate("/")}
+              onClick={() => navigate("/create")}
               title="Create new AB test"
             >
               + New

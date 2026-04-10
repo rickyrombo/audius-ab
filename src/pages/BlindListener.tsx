@@ -349,7 +349,7 @@ export default function BlindListener() {
           <button
             type="button"
             className="btn-header btn-login"
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/create")}
             title="Create new AB test"
           >
             + New

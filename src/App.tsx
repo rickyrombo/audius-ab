@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import LandingPage from './pages/LandingPage'
 import Creator from './pages/Creator'
 import Projects from './pages/Projects'
 import Listener from './pages/Listener'
@@ -16,7 +17,8 @@ export default function App() {
         <BackgroundVisualizer />
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Creator />} />
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/create" element={<Creator />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/analyze/:playlistId" element={<Listener />} />
             <Route path="/blind/:playlistId" element={<BlindListener />} />

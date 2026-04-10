@@ -34,7 +34,7 @@ export default function BlindListener() {
     return () => { document.title = "Audius A/B — Compare Audio Mixes Side by Side"; };
   }, [playlist?.playlistName]);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
-  const [showLoading, setShowLoading] = useState(false);
+
 
   const { currentUserHandle, checkAuth, ensureUser, logout } = useAuth();
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -74,16 +74,6 @@ export default function BlindListener() {
   });
 
   const loadError = waveformError ?? (queryError?.message ?? null);
-
-  // Delay showing loading modal by 1s
-  useEffect(() => {
-    if (tracks.length && isReady) {
-      setShowLoading(false);
-      return;
-    }
-    const timer = setTimeout(() => setShowLoading(true), 1000);
-    return () => clearTimeout(timer);
-  }, [tracks.length, isReady]);
 
   // Check auth on mount
   useEffect(() => {
@@ -188,17 +178,7 @@ export default function BlindListener() {
     );
   }
 
-  if (!playlist) {
-    if (!showLoading) return null;
-    return (
-      <div className="modal-overlay">
-        <div className="modal loading-modal">
-          <div className="spinner" />
-          <p>Loading blind A/B test…</p>
-        </div>
-      </div>
-    );
-  }
+  if (!playlist) return null;
 
   if (tracks.length < 2) {
     return (
@@ -220,15 +200,6 @@ export default function BlindListener() {
 
   return (
     <div className="page blind-page">
-      {!isReady && showLoading && (
-        <div className="modal-overlay">
-          <div className="modal loading-modal">
-            <div className="spinner" />
-            <p>Preparing blind A/B test...</p>
-          </div>
-        </div>
-      )}
-
       <div className="blind-top-bar">
         <div className="header-actions">
           <button
@@ -350,7 +321,7 @@ export default function BlindListener() {
               onClick={handlePlayPause}
               disabled={!isReady}
             >
-              {isPlaying ? "⏸" : "▶"}
+              {!isReady ? <div className="spinner spinner-play" /> : isPlaying ? "⏸" : "▶"}
             </button>
             <button
               type="button"

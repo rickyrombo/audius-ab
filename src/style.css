@@ -315,6 +315,12 @@ a:focus-visible,
   border-top-color: #fff;
   flex-shrink: 0;
 }
+.spinner-play {
+  width: 24px;
+  height: 24px;
+  border-color: rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+}
 
 @keyframes spin {
   to { transform: rotate(360deg); }

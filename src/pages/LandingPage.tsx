@@ -86,7 +86,7 @@ export default function LandingPage() {
       <section className="landing-hero">
         <img src="/landing/hero-bg.png" alt="" className="landing-hero-bg" />
         <div className="landing-container landing-hero-inner">
-          <img src="/landing/logo.svg" alt="Audius A/B" className="landing-logo" />
+          <img src="/landing/logo.svg" alt="A/B" className="landing-logo" />
           <h1 className="landing-headline">
             The Ultimate Reference Tool for Audio Creators
           </h1>
@@ -111,7 +111,7 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="landing-hero-screenshot">
-              <img src="/landing/screenshot.png" alt="Audius A/B interface" />
+              <img src="/landing/screenshot.png" alt="A/B interface" />
             </div>
           </div>
         </div>
@@ -120,9 +120,9 @@ export default function LandingPage() {
       {/* ── About ── */}
       <section className="landing-section landing-about">
         <div className="landing-container">
-          <h2 className="landing-section-title">What is Audius A/B?</h2>
+          <h2 className="landing-section-title">What is A/B?</h2>
           <p className="landing-section-desc">
-            Audius A/B is a purpose-built platform designed to solve the age-old
+            A/B is a purpose-built platform designed to solve the age-old
             problem of track referencing and client feedback. It gives producers
             and engineers an objective, data-driven way to compare multiple
             versions of a track.
@@ -194,7 +194,7 @@ export default function LandingPage() {
           <h2 className="landing-section-title">Built for the Studio</h2>
           <p className="landing-section-desc">
             Whether you are making critical mixing decisions or seeing what
-            sticks with listeners, Audius A/B provides the context you need.
+            sticks with listeners, A/B provides the context you need.
           </p>
           <div className="landing-cards">
             {audiences.map((a) => (
@@ -217,7 +217,7 @@ export default function LandingPage() {
             The ultimate A/B testing tool for audio creators. Compare, analyze,
             and get actionable feedback.
           </p>
-          <img src="/landing/logo.svg" alt="Audius A/B" className="landing-footer-logo" />
+          <img src="/landing/logo.svg" alt="A/B" className="landing-footer-logo" />
         </div>
       </footer>
     </div>

@@ -83,10 +83,10 @@ export default function Listener() {
     ? editableName
     : playlist?.playlistName || (
         viewTracks.length >= 2
-          ? `Audius AB: ${viewTracks[0].title} vs ${viewTracks[1].title}`
+          ? `A/B: ${viewTracks[0].title} vs ${viewTracks[1].title}`
           : viewTracks.length === 1
-            ? `Audius AB: ${viewTracks[0].title}`
-            : "Audius AB"
+            ? `A/B: ${viewTracks[0].title}`
+            : "A/B"
       );
   const description = isCreateMode
     ? editableQuestion
@@ -95,9 +95,9 @@ export default function Listener() {
 
   // Dynamic page title
   useEffect(() => {
-    const name = isCreateMode ? "New Project" : (playlist?.playlistName || "Audius A/B");
-    document.title = `${name} — Audius A/B`;
-    return () => { document.title = "Audius A/B — Compare Audio Mixes Side by Side"; };
+    const name = isCreateMode ? "New Project" : (playlist?.playlistName || "A/B");
+    document.title = `${name} — A/B`;
+    return () => { document.title = "A/B — Compare Audio Mixes Side by Side"; };
   }, [isCreateMode, playlist?.playlistName]);
 
   // Sync editable fields when playlist loads

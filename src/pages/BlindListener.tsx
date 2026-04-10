@@ -30,8 +30,8 @@ export default function BlindListener() {
   // Dynamic page title
   useEffect(() => {
     const name = playlist?.playlistName || "Blind Test";
-    document.title = `${name} — Blind Test — Audius A/B`;
-    return () => { document.title = "Audius A/B — Compare Audio Mixes Side by Side"; };
+    document.title = `${name} — Blind Test — A/B`;
+    return () => { document.title = "A/B — Compare Audio Mixes Side by Side"; };
   }, [playlist?.playlistName]);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
 
@@ -171,7 +171,7 @@ export default function BlindListener() {
     return (
       <div className="page">
         <div className="page-header">
-          <h1>Audius AB</h1>
+          <h1>A/B</h1>
         </div>
         <p className="status-msg error">Error: {loadError}</p>
       </div>
@@ -184,7 +184,7 @@ export default function BlindListener() {
     return (
       <div className="page">
         <div className="page-header">
-          <h1>Audius AB</h1>
+          <h1>A/B</h1>
         </div>
         <p className="status-msg error">
           This project needs at least 2 tracks for a blind test.

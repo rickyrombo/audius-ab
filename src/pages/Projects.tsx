@@ -31,8 +31,8 @@ export default function Projects() {
   useEffect(() => { checkAuth() }, [checkAuth])
 
   useEffect(() => {
-    document.title = "My Projects — Audius A/B"
-    return () => { document.title = "Audius A/B — Compare Audio Mixes Side by Side" }
+    document.title = "My Projects — A/B"
+    return () => { document.title = "A/B — Compare Audio Mixes Side by Side" }
   }, [])
 
   const login = async () => {

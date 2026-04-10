@@ -19,6 +19,7 @@ export function useSyncedWaveforms(
 ) {
   const syncedRef = useRef<SyncedWaveforms | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [trackDurations, setTrackDurations] = useState<number[]>([]);
@@ -38,6 +39,7 @@ export function useSyncedWaveforms(
     const synced = new SyncedWaveforms();
     syncedRef.current = synced;
     setIsReady(false);
+    setLoadError(null);
     setCurrentTime(0);
     setDuration(0);
     setColorData([]);
@@ -69,7 +71,16 @@ export function useSyncedWaveforms(
     synced.onFinish(() => {
       finishRef.current?.();
     });
-    synced.load(sources);
+    synced.load(sources).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('Unable to decode') || msg.includes('NotSupportedError')) {
+        setLoadError('Unsupported audio format. Try MP3, WAV, or FLAC.');
+      } else if (msg.includes('abort') || msg.includes('AbortError')) {
+        setLoadError('Audio download timed out. Check your connection and try again.');
+      } else {
+        setLoadError(msg || 'Failed to load audio');
+      }
+    });
 
     return () => {
       synced.destroy();
@@ -80,6 +91,7 @@ export function useSyncedWaveforms(
 
   return {
     isReady,
+    loadError,
     currentTime,
     duration,
     trackDurations,

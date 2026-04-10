@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useSyncedWaveforms } from "../hooks/useSyncedWaveforms";
+import { useHotkeys } from "../hooks/useHotkeys";
 import { useAuth } from "../hooks/useAuth";
 import { useComments } from "../hooks/useComments";
 import { usePostComment } from "../hooks/usePostComment";
@@ -91,7 +92,13 @@ export default function Listener() {
     ? editableQuestion
     : (playlist?.description ?? "").replace(/Made with Audius A\/B/g, "").trim();
   const ownerId = playlist?.user?.id ?? null;
-  const loadError = isCreateMode ? null : (queryError?.message ?? null);
+
+  // Dynamic page title
+  useEffect(() => {
+    const name = isCreateMode ? "New Project" : (playlist?.playlistName || "Audius A/B");
+    document.title = `${name} — Audius A/B`;
+    return () => { document.title = "Audius A/B — Compare Audio Mixes Side by Side"; };
+  }, [isCreateMode, playlist?.playlistName]);
 
   // Sync editable fields when playlist loads
   const [initializedFromPlaylist, setInitializedFromPlaylist] = useState(false);
@@ -144,6 +151,7 @@ export default function Listener() {
 
   const { currentUserId, currentUserHandle, checkAuth, ensureUser, logout } =
     useAuth();
+  const [loginError, setLoginError] = useState<string | null>(null);
   const canEdit = isCreateMode || (!!currentUserId && currentUserId === ownerId);
 
   // Dirty state: are there unsaved changes?
@@ -211,6 +219,7 @@ export default function Listener() {
 
   const {
     isReady,
+    loadError: waveformError,
     currentTime,
     duration,
     trackDurations,
@@ -231,6 +240,8 @@ export default function Listener() {
       setIsPlaying(false);
     }
   );
+
+  const loadError = waveformError ?? (isCreateMode ? null : (queryError?.message ?? null));
 
   // Delay showing loading modal by 1s
   useEffect(() => {
@@ -254,171 +265,34 @@ export default function Listener() {
     bgViz.setBpm(bpms[activeIndex] ?? 120);
   }, [isPlaying, bpms, activeIndex, bgViz]);
 
-  // Refs for hotkey handlers to avoid stale closures
-  const activeIndexRef = useRef(activeIndex);
-  activeIndexRef.current = activeIndex;
-  const isPlayingRef = useRef(isPlaying);
-  isPlayingRef.current = isPlaying;
-  const durationRef = useRef(duration);
-  durationRef.current = duration;
+  // Ref for current time used by comment hotkey
   const currentTimeRef = useRef(currentTime);
   currentTimeRef.current = currentTime;
-  const seekRef = useRef(seek);
-  seekRef.current = seek;
-  const playRef = useRef(play);
-  playRef.current = play;
-  const bpmsRef = useRef(bpms);
-  bpmsRef.current = bpms;
-  const pauseRef = useRef(pause);
-  pauseRef.current = pause;
 
-  // Hotkeys
-  useEffect(() => {
-    const FINE_NUDGE_SECS = 0.5;
-
-    /** 4 beats in seconds based on active track's BPM */
-    function fourBeatsSecs(): number {
-      const bpm = bpmsRef.current[activeIndexRef.current] || 120;
-      return (60 / bpm) * 4;
-    }
-    const FF_INTERVAL_MS = 80;
-    const FF_SECS_PER_TICK = 0.5;
-    const HOLD_THRESHOLD_MS = 300;
-    let holdTimer: ReturnType<typeof setTimeout> | null = null;
-    let ffInterval: ReturnType<typeof setInterval> | null = null;
-    let didHold = false;
-    let wasShiftSeek = false;
-
-    function seekRelative(deltaSecs: number) {
-      const dur = durationRef.current;
-      if (dur <= 0) return;
-      // Read real-time position from audio engine, not throttled React state
-      const cur = syncedRef.current?.getCurrentTime() ?? currentTimeRef.current;
-      const newTime = Math.max(0, Math.min(dur, cur + deltaSecs));
-      seekRef.current?.(newTime / dur);
-    }
-
-    const FF_SHIFT_MULTIPLIER = 4;
-    let shiftHeld = false;
-
-    function startFastSeek(dir: number) {
-      if (ffInterval) return;
-      didHold = true;
-      ffInterval = setInterval(() => {
-        const base = FF_SECS_PER_TICK;
-        seekRelative(dir * base * (shiftHeld ? FF_SHIFT_MULTIPLIER : 1));
-      }, FF_INTERVAL_MS);
-    }
-
-    function stopFastSeek() {
-      if (holdTimer) {
-        clearTimeout(holdTimer);
-        holdTimer = null;
-      }
-      if (ffInterval) {
-        clearInterval(ffInterval);
-        ffInterval = null;
-      }
-    }
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Shift") {
-        shiftHeld = true;
-        return;
-      }
-      if (
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLInputElement ||
-        (e.target instanceof HTMLElement && e.target.isContentEditable)
-      )
-        return;
-
-      if (e.key === " ") {
-        e.preventDefault();
-        if (isPlayingRef.current) {
-          pauseRef.current?.();
-          setIsPlaying(false);
-        } else {
-          playRef.current?.();
-          setIsPlaying(true);
-        }
-        return;
-      }
-
+  useHotkeys({
+    activeIndex,
+    isPlaying,
+    duration,
+    currentTime,
+    bpms,
+    trackCount: tracks.length,
+    syncedRef,
+    seek,
+    play,
+    pause,
+    setIsPlaying,
+    onToggleTrack: handleToggleTrack,
+    onExtraKey: (e) => {
       if (e.key === "c" || e.key === "C") {
         e.preventDefault();
-        const idx = activeIndexRef.current;
-        setCommentTrackIdx(idx);
+        setCommentTrackIdx(activeIndex);
         setCommentTime(currentTimeRef.current);
-        commentTextareaRefs.current[idx]?.focus();
-        return;
+        commentTextareaRefs.current[activeIndex]?.focus();
+        return true;
       }
-
-      const numIdx = ["1", "2"].indexOf(e.key);
-      if (numIdx !== -1 && numIdx < tracks.length) {
-        handleToggleTrack(numIdx);
-        return;
-      }
-
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        const prev = Math.max(0, activeIndexRef.current - 1);
-        if (prev !== activeIndexRef.current) handleToggleTrack(prev);
-        return;
-      }
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        const next = Math.min(tracks.length - 1, activeIndexRef.current + 1);
-        if (next !== activeIndexRef.current) handleToggleTrack(next);
-        return;
-      }
-
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        e.preventDefault();
-        const dir = e.key === "ArrowRight" ? 1 : -1;
-        if (e.repeat) return;
-        didHold = false;
-        wasShiftSeek = e.shiftKey;
-        shiftHeld = e.shiftKey;
-        holdTimer = setTimeout(() => startFastSeek(dir), HOLD_THRESHOLD_MS);
-        return;
-      }
-    }
-
-    function handleKeyUp(e: KeyboardEvent) {
-      if (e.key === "Shift") {
-        shiftHeld = false;
-        return;
-      }
-      if (
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLInputElement ||
-        (e.target instanceof HTMLElement && e.target.isContentEditable)
-      )
-        return;
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        const dir = e.key === "ArrowRight" ? 1 : -1;
-        stopFastSeek();
-        if (!didHold) {
-          if (wasShiftSeek) {
-            seekRelative(dir * fourBeatsSecs());
-          } else {
-            seekRelative(dir * FINE_NUDGE_SECS);
-          }
-        }
-        didHold = false;
-        wasShiftSeek = false;
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      stopFastSeek();
-    };
-  }, [tracks]);
+      return false;
+    },
+  });
 
   function handleToggleTrack(i: number) {
     setActiveIndex(i);
@@ -772,8 +646,9 @@ export default function Listener() {
                 type="button"
                 className="btn-header btn-header-text"
                 onClick={() => {
-                  ensureUser().catch((err) =>
-                    console.error("Login failed:", err)
+                  setLoginError(null);
+                  ensureUser().catch(() =>
+                    setLoginError("Login failed. Please try again.")
                   );
                 }}
                 title="Log in with Audius"
@@ -781,6 +656,7 @@ export default function Listener() {
                 Log in
               </button>
             )}
+            {loginError && <span className="status-msg error">{loginError}</span>}
           </div>
           <div className="header-playback-row">
             <button
@@ -1528,6 +1404,7 @@ export default function Listener() {
               <div className="share-links">
                 <div className="share-link-group">
                   <label>Analysis link</label>
+                  <span className="share-link-desc">Full view with track names and analyzers</span>
                   <div className="share-link-row">
                     <input type="text" readOnly value={analyzeUrl} />
                     <CopyButton url={analyzeUrl} />
@@ -1535,6 +1412,7 @@ export default function Listener() {
                 </div>
                 <div className="share-link-group">
                   <label>Blind test link</label>
+                  <span className="share-link-desc">Track names hidden for unbiased listening</span>
                   <div className="share-link-row">
                     <input type="text" readOnly value={blindUrl} />
                     <CopyButton url={blindUrl} />
@@ -1693,7 +1571,16 @@ export default function Listener() {
               Listen, analyze, and leave timestamped comments.
             </p>
 
-            <h3>How to use</h3>
+            <h3>Creating a project</h3>
+            <ul>
+              <li>Drag and drop audio files onto the waveform areas, or click to browse</li>
+              <li>Edit the project name and add a question for your listeners</li>
+              <li>Click <strong>Save</strong> to upload and create your project</li>
+              <li>Use <strong>Share</strong> to get links — <em>Analysis</em> shows track names and analyzers, <em>Blind Test</em> hides names for unbiased feedback</li>
+              <li>You can replace track audio at any time by dropping a new file</li>
+            </ul>
+
+            <h3>Analyzing</h3>
             <ul>
               <li>
                 Press play or hit <kbd>Space</kbd> to start playback

@@ -19,11 +19,6 @@ export function getStreamUrls(stream: UrlWithMirrors | undefined): string[] {
   return urls
 }
 
-/** Get the best single stream URL (primary, or first mirror fallback). */
-export function getStreamUrl(stream: UrlWithMirrors | undefined): string {
-  return getStreamUrls(stream)[0] ?? ''
-}
-
 /** Fetch from the primary URL, falling back to mirrors on failure. */
 export async function fetchWithMirrors(urls: string[], timeoutMs = 10_000): Promise<Response> {
   let lastError: Error | null = null

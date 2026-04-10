@@ -12,8 +12,19 @@ interface Props {
 const DIM_FACTOR = 0.55
 const TILE_WIDTH = 8192 // px per tile (well under canvas max)
 
-// Module-level tile cache so tiles survive unmount/remount (zoom toggle)
+// Module-level tile cache so tiles survive unmount/remount (zoom toggle).
+// FIFO eviction keeps memory bounded — each entry holds pre-rendered canvas tiles.
+const MAX_TILE_ENTRIES = 16
 const tileCache = new Map<string, { bright: HTMLCanvasElement[]; dim: HTMLCanvasElement[]; h: number }>()
+
+function tileCacheSet(key: string, value: { bright: HTMLCanvasElement[]; dim: HTMLCanvasElement[]; h: number }) {
+  tileCache.set(key, value)
+  if (tileCache.size > MAX_TILE_ENTRIES) {
+    // Delete oldest entry (first key in insertion order)
+    const first = tileCache.keys().next().value
+    if (first !== undefined) tileCache.delete(first)
+  }
+}
 
 export default function ZoomedWaveform({
   syncedRef,
@@ -87,7 +98,7 @@ export default function ZoomedWaveform({
     brightTilesRef.current = brightTiles
     dimTilesRef.current = dimTiles
     tileHRef.current = pxH
-    tileCache.set(cacheKey, { bright: brightTiles, dim: dimTiles, h: pxH })
+    tileCacheSet(cacheKey, { bright: brightTiles, dim: dimTiles, h: pxH })
   }, [colorData])
 
   useEffect(() => {

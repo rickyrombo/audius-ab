@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useSyncedWaveforms } from "../hooks/useSyncedWaveforms";
+import { useHotkeys } from "../hooks/useHotkeys";
 import { usePlaylistTracks } from "../hooks/usePlaylistTracks";
 import { getStreamUrls } from "../lib/streamUrl";
 import type { TrackSource } from "../lib/waveforms";
@@ -17,7 +18,6 @@ export default function BlindListener() {
   const { data: playlist, error: queryError } = usePlaylistTracks(playlistId);
   const tracks = playlist?.tracks ?? [];
   const description = (playlist?.description ?? "").replace(/Made with Audius A\/B/g, "").trim();
-  const loadError = queryError?.message ?? null;
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -26,10 +26,18 @@ export default function BlindListener() {
   const [showHelp, setShowHelp] = useState(() => !localStorage.getItem('helpDismissed:blind'));
   const dismissHelp = () => { localStorage.setItem('helpDismissed:blind', '1'); setShowHelp(false); };
   const ownerName = playlist?.user?.name || playlist?.user?.handle || null;
+
+  // Dynamic page title
+  useEffect(() => {
+    const name = playlist?.playlistName || "Blind Test";
+    document.title = `${name} — Blind Test — Audius A/B`;
+    return () => { document.title = "Audius A/B — Compare Audio Mixes Side by Side"; };
+  }, [playlist?.playlistName]);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [showLoading, setShowLoading] = useState(false);
 
   const { currentUserHandle, checkAuth, ensureUser, logout } = useAuth();
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   // Randomize track order on mount — stable for the session
   const [shuffleMap] = useState<[number, number]>(() =>
@@ -52,6 +60,7 @@ export default function BlindListener() {
 
   const {
     isReady,
+    loadError: waveformError,
     currentTime,
     duration,
     bpms,
@@ -63,6 +72,8 @@ export default function BlindListener() {
   } = useSyncedWaveforms(waveformSources, undefined, () => {
     setIsPlaying(false);
   });
+
+  const loadError = waveformError ?? (queryError?.message ?? null);
 
   // Delay showing loading modal by 1s
   useEffect(() => {
@@ -86,157 +97,20 @@ export default function BlindListener() {
     bgViz.setBpm(bpms[activeIndex] ?? 120);
   }, [isPlaying, bpms, activeIndex, bgViz]);
 
-  // Refs for hotkey handlers to avoid stale closures
-  const activeIndexRef = useRef(activeIndex);
-  activeIndexRef.current = activeIndex;
-  const isPlayingRef = useRef(isPlaying);
-  isPlayingRef.current = isPlaying;
-  const durationRef = useRef(duration);
-  durationRef.current = duration;
-  const currentTimeRef = useRef(currentTime);
-  currentTimeRef.current = currentTime;
-  const seekRef = useRef(seek);
-  seekRef.current = seek;
-  const playRef = useRef(play);
-  playRef.current = play;
-  const bpmsRef = useRef(bpms);
-  bpmsRef.current = bpms;
-  const pauseRef = useRef(pause);
-  pauseRef.current = pause;
-
-  // Hotkeys
-  useEffect(() => {
-    const FINE_NUDGE_SECS = 0.5;
-
-    function fourBeatsSecs(): number {
-      const bpm = bpmsRef.current[activeIndexRef.current] || 120;
-      return (60 / bpm) * 4;
-    }
-    const FF_INTERVAL_MS = 80;
-    const FF_SECS_PER_TICK = 0.5;
-    const HOLD_THRESHOLD_MS = 300;
-    let holdTimer: ReturnType<typeof setTimeout> | null = null;
-    let ffInterval: ReturnType<typeof setInterval> | null = null;
-    let didHold = false;
-    let wasShiftSeek = false;
-
-    function seekRelative(deltaSecs: number) {
-      const dur = durationRef.current;
-      if (dur <= 0) return;
-      const cur = syncedRef.current?.getCurrentTime() ?? currentTimeRef.current;
-      const newTime = Math.max(0, Math.min(dur, cur + deltaSecs));
-      seekRef.current?.(newTime / dur);
-    }
-
-    const FF_SHIFT_MULTIPLIER = 4;
-    let shiftHeld = false;
-
-    function startFastSeek(dir: number) {
-      if (ffInterval) return;
-      didHold = true;
-      ffInterval = setInterval(() => {
-        seekRelative(
-          dir * FF_SECS_PER_TICK * (shiftHeld ? FF_SHIFT_MULTIPLIER : 1)
-        );
-      }, FF_INTERVAL_MS);
-    }
-
-    function stopFastSeek() {
-      if (holdTimer) {
-        clearTimeout(holdTimer);
-        holdTimer = null;
-      }
-      if (ffInterval) {
-        clearInterval(ffInterval);
-        ffInterval = null;
-      }
-    }
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Shift") {
-        shiftHeld = true;
-        return;
-      }
-      if (
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLInputElement
-      )
-        return;
-
-      if (e.key === " ") {
-        e.preventDefault();
-        if (isPlayingRef.current) {
-          pauseRef.current?.();
-          setIsPlaying(false);
-        } else {
-          playRef.current?.();
-          setIsPlaying(true);
-        }
-        return;
-      }
-
-      const numIdx = ["1", "2"].indexOf(e.key);
-      if (numIdx !== -1) {
-        handleToggle(numIdx);
-        return;
-      }
-
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        handleToggle(0);
-        return;
-      }
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        handleToggle(1);
-        return;
-      }
-
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        e.preventDefault();
-        const dir = e.key === "ArrowRight" ? 1 : -1;
-        if (e.repeat) return;
-        didHold = false;
-        wasShiftSeek = e.shiftKey;
-        shiftHeld = e.shiftKey;
-        holdTimer = setTimeout(() => startFastSeek(dir), HOLD_THRESHOLD_MS);
-        return;
-      }
-    }
-
-    function handleKeyUp(e: KeyboardEvent) {
-      if (e.key === "Shift") {
-        shiftHeld = false;
-        return;
-      }
-      if (
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLInputElement
-      )
-        return;
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        const dir = e.key === "ArrowRight" ? 1 : -1;
-        stopFastSeek();
-        if (!didHold) {
-          if (wasShiftSeek) {
-            seekRelative(dir * fourBeatsSecs());
-          } else {
-            seekRelative(dir * FINE_NUDGE_SECS);
-          }
-        }
-        didHold = false;
-        wasShiftSeek = false;
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      stopFastSeek();
-    };
-  }, [tracks]);
+  useHotkeys({
+    activeIndex,
+    isPlaying,
+    duration,
+    currentTime,
+    bpms,
+    trackCount: 2,
+    syncedRef,
+    seek,
+    play,
+    pause,
+    setIsPlaying,
+    onToggleTrack: handleToggle,
+  });
 
   function handlePlayPause() {
     if (isPlaying) {
@@ -314,7 +188,7 @@ export default function BlindListener() {
     );
   }
 
-  if (!tracks.length) {
+  if (!playlist) {
     if (!showLoading) return null;
     return (
       <div className="modal-overlay">
@@ -322,6 +196,22 @@ export default function BlindListener() {
           <div className="spinner" />
           <p>Loading blind A/B test…</p>
         </div>
+      </div>
+    );
+  }
+
+  if (tracks.length < 2) {
+    return (
+      <div className="page">
+        <div className="page-header">
+          <h1>Audius AB</h1>
+        </div>
+        <p className="status-msg error">
+          This project needs at least 2 tracks for a blind test.
+        </p>
+        <Link to={`/analyze/${playlistId}`} className="btn-primary" style={{ alignSelf: 'flex-start' }}>
+          Open in analyzer
+        </Link>
       </div>
     );
   }
@@ -395,8 +285,9 @@ export default function BlindListener() {
               type="button"
               className="btn-header btn-header-text"
               onClick={() => {
-                ensureUser().catch((err) =>
-                  console.error("Login failed:", err)
+                setLoginError(null);
+                ensureUser().catch(() =>
+                  setLoginError("Login failed. Please try again.")
                 );
               }}
               title="Log in with Audius"
@@ -404,6 +295,7 @@ export default function BlindListener() {
               Log in
             </button>
           )}
+          {loginError && <span className="status-msg error">{loginError}</span>}
         </div>
       </div>
 

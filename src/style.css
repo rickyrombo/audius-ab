@@ -74,6 +74,14 @@ textarea {
   min-height: 80px;
 }
 
+/* ── Focus-visible ── */
+button:focus-visible,
+a:focus-visible,
+[contenteditable]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ── Layout ── */
 .page {
   max-width: 100%;
@@ -145,23 +153,36 @@ textarea {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   margin: 0 auto;
   padding: 40px 20px;
   gap: 16px;
 }
+.projects-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.projects-header h1 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+.projects-header-actions {
+  display: flex;
+  gap: 8px;
+}
 .projects-user {
   color: var(--text-muted);
   font-size: 13px;
+  margin-top: 2px;
 }
 .projects-login,
 .projects-loading,
 .projects-empty {
   text-align: center;
-  padding: 40px 0;
+  padding: 60px 0;
   color: var(--text-muted);
-}
-.projects-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -176,21 +197,20 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: 10px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px 16px;
-  position: relative;
-}
-.project-card > .btn-delete {
-  position: absolute;
-  top: 8px;
-  right: 8px;
 }
 .project-card-info {
+  flex: 1;
   min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+.project-card-info:hover h2 {
+  color: var(--accent);
 }
 .project-card-info h2 {
   font-size: 14px;
@@ -200,6 +220,7 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   margin: 0;
+  transition: color 0.15s;
 }
 .project-card-desc {
   font-size: 12px;
@@ -212,6 +233,40 @@ textarea {
 .project-card-meta {
   font-size: 11px;
   color: var(--text-muted);
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.project-card-dot {
+  opacity: 0.5;
+}
+.project-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.btn-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+.btn-icon:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+.btn-icon-danger:hover {
+  color: #f44;
+  border-color: #f44;
 }
 .project-card-share {
   width: 100%;
@@ -219,27 +274,17 @@ textarea {
   flex-direction: column;
   gap: 8px;
   margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
 }
-.btn-delete {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
+.project-card-deleting {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.modal-title {
   font-size: 16px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
-.btn-delete:hover {
-  color: #f44;
-  border-color: #f44;
-}
-.projects-footer {
-  padding-top: 8px;
+  font-weight: 600;
+  margin: 0 0 8px;
 }
 
 /* ── Creator ── */
@@ -719,18 +764,24 @@ textarea {
   align-items: center;
   justify-content: center;
   padding: 0;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .btn-header:hover {
   color: var(--text);
   border-color: var(--text-muted);
 }
 
-.btn-login {
+.btn-header-text {
   width: auto;
   border-radius: var(--radius);
   padding: 0 12px;
   font-weight: 600;
   font-size: 13px;
+  gap: 5px;
+  line-height: 1;
+}
+.btn-header-text svg {
+  flex-shrink: 0;
 }
 
 .user-handle-text {
@@ -1464,35 +1515,7 @@ kbd {
   margin-left: auto;
 }
 
-.loudness-metric-tab {
-  background: var(--surface2);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 3px 8px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  white-space: nowrap;
-}
-.loudness-metric-tab:hover:not(.active) {
-  color: var(--text);
-  border-color: var(--text-muted);
-}
-.loudness-metric-tab.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-.space-mode-tabs {
-  display: flex;
-  gap: 4px;
-  margin-top: 6px;
-  flex-wrap: wrap;
-}
-
+.loudness-metric-tab,
 .space-mode-tab {
   background: var(--surface2);
   color: var(--text-muted);
@@ -1505,14 +1528,23 @@ kbd {
   letter-spacing: 0.3px;
   white-space: nowrap;
 }
+.loudness-metric-tab:hover:not(.active),
 .space-mode-tab:hover:not(.active) {
   color: var(--text);
   border-color: var(--text-muted);
 }
+.loudness-metric-tab.active,
 .space-mode-tab.active {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
+}
+
+.space-mode-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
 }
 
 .analyzer-overlay-bar {
@@ -2064,26 +2096,30 @@ kbd {
   outline: none;
   cursor: text;
   border-radius: 3px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
 }
 
 .editable-title:hover,
 .editable-question:hover {
   background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border);
 }
 
 .editable-title:focus,
 .editable-question:focus {
   background: rgba(255, 255, 255, 0.08);
+  border-color: var(--text-muted);
 }
 
 .editable-title:empty::before,
 .editable-question:empty::before {
   content: attr(data-placeholder);
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--text-muted);
   pointer-events: none;
 }
 
-.btn-save,
 .btn-save,
 .btn-share {
   width: auto;
@@ -2099,8 +2135,11 @@ kbd {
 }
 
 .btn-save {
-  background: #e60000 !important;
+  background: var(--accent) !important;
   color: #fff !important;
+}
+.btn-save:hover:not(:disabled) {
+  background: var(--accent-hover) !important;
 }
 
 
@@ -2111,7 +2150,7 @@ kbd {
 
 .btn-save:disabled,
 .btn-share:disabled {
-  opacity: 0.4;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
@@ -2159,14 +2198,15 @@ kbd {
   background: #000;
   color: #fafafa;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
 }
 
 .landing-container {
-  max-width: 1040px;
+  max-width: 1080px;
   width: 100%;
   margin: 0 auto;
   padding: 0 20px;
-  box-sizing: content-box;
+  box-sizing: border-box;
 }
 
 /* ── Hero ── */
@@ -2207,6 +2247,7 @@ kbd {
   line-height: 72px;
   letter-spacing: -1.68px;
   color: #fafafa;
+  overflow-wrap: break-word;
 }
 
 .landing-hero-content {
@@ -2219,8 +2260,8 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 24px;
-  width: 540px;
-  flex-shrink: 0;
+  max-width: 540px;
+  flex-shrink: 1;
 }
 
 .landing-subtext {
@@ -2249,7 +2290,7 @@ kbd {
   letter-spacing: -0.31px;
   text-decoration: none;
   color: #fafafa;
-  width: 200px;
+  min-width: 200px;
   transition: filter 0.15s;
 }
 .landing-btn:hover {
@@ -2258,7 +2299,10 @@ kbd {
 }
 
 .landing-btn-primary {
-  background: #e60000;
+  background: var(--accent);
+}
+.landing-btn-primary:hover {
+  background: var(--accent-hover);
 }
 
 .landing-btn-secondary {
@@ -2409,7 +2453,7 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #e60000;
+  color: var(--accent);
 }
 
 .landing-feature-text h3 {
@@ -2493,11 +2537,11 @@ kbd {
   }
 
   .landing-hero-text {
-    width: 100%;
+    max-width: 100%;
   }
 
   .landing-cards {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .landing-features-grid {
@@ -2508,6 +2552,12 @@ kbd {
     flex-direction: column;
     gap: 32px;
     text-align: center;
+  }
+}
+
+@media (max-width: 700px) {
+  .landing-cards {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -2540,5 +2590,6 @@ kbd {
 
   .landing-btn {
     width: 100%;
+    min-width: 0;
   }
 }

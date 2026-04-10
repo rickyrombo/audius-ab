@@ -8,12 +8,7 @@ import type { Track } from "@audius/sdk";
 import { useAuth } from "../hooks/useAuth";
 import { useBlindSubmit } from "../hooks/useBlindSubmit";
 import { useBackgroundVisualizer } from "../contexts/BackgroundVisualizerContext";
-
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
+import { formatTime } from "../lib/utils";
 
 export default function BlindListener() {
   const { playlistId } = useParams<{ playlistId: string }>();
@@ -348,12 +343,18 @@ export default function BlindListener() {
         <div className="header-actions">
           <button
             type="button"
-            className="btn-header btn-login"
+            className="btn-header btn-header-text"
             onClick={() => navigate("/analyze")}
             title="Create new AB test"
           >
-            + New
+            + New Project
           </button>
+          <Link to="/projects" className="btn-header btn-header-text" title="My projects">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            Projects
+          </Link>
           <button
             type="button"
             className="btn-header"
@@ -392,7 +393,7 @@ export default function BlindListener() {
           ) : (
             <button
               type="button"
-              className="btn-header btn-login"
+              className="btn-header btn-header-text"
               onClick={() => {
                 ensureUser().catch((err) =>
                   console.error("Login failed:", err)

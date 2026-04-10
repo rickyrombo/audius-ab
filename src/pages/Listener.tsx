@@ -19,6 +19,8 @@ import VolumeIndicator, { type GraphMetric } from "../components/VolumeIndicator
 import RGBWaveform from "../components/RGBWaveform";
 import ZoomedWaveform from "../components/ZoomedWaveform";
 import { useBackgroundVisualizer } from "../contexts/BackgroundVisualizerContext";
+import { CopyButton } from "../components/CopyButton";
+import { formatTime } from "../lib/utils";
 
 const LABELS = ["A", "B"];
 
@@ -42,13 +44,6 @@ function AvatarImg({
   return <img src={src} alt={alt} onError={tryMirror} />;
 }
 
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-
 function isAudioFile(file: File): boolean {
   return file.type.startsWith('audio/') || /\.(mp3|wav|flac|aiff?|ogg|m4a|aac)$/i.test(file.name);
 }
@@ -65,7 +60,7 @@ export default function Listener() {
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
   const [localOverrides, setLocalOverrides] = useState<Record<number, File>>({});
   const [showShareModal, setShowShareModal] = useState(false);
-  const [copied, setCopied] = useState(false);
+
   const [showSavePrompt, setShowSavePrompt] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const [showClearCommentsConfirm, setShowClearCommentsConfirm] = useState(false);
@@ -434,7 +429,19 @@ export default function Listener() {
   function renderCommentForm(i: number) {
     const hasTrack = i === 0 ? hasTrackA : hasTrackB;
     const trackOwnedByCreator = isCreateMode || (!!ownerId && tracks[i]?.userId === ownerId);
-    const commentDisabled = !hasTrack || !trackOwnedByCreator;
+    const hasOverride = !!localOverrides[i];
+    const commentDisabled = !hasTrack || !trackOwnedByCreator || hasOverride;
+    const disabledReason = !hasTrack
+      ? "Add a track to enable comments"
+      : hasOverride
+        ? "Save to enable comments on replaced track"
+        : isCreateMode
+          ? "Save your project to enable comments"
+          : !currentUserId
+            ? "Log in to comment"
+            : !trackOwnedByCreator
+              ? "Track not owned by project owner"
+              : "";
     return (
       <div className="comment-form">
         <textarea
@@ -444,7 +451,7 @@ export default function Listener() {
           rows={1}
           placeholder={
             commentDisabled
-              ? ""
+              ? disabledReason
               : hasTrackB ? `Comment on ${LABELS[i]}…` : "Leave a comment…"
           }
           value={commentTrackIdx === i ? commentText : ""}
@@ -621,12 +628,6 @@ export default function Listener() {
     handleFileSelect(slot, files[0]);
   }
 
-  function handleCopyLink(url: string) {
-    navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
   const hasTrackA = isCreateMode ? createProject.tracks.length >= 1 : tracks.length >= 1;
   const hasTrackB = isCreateMode ? createProject.tracks.length >= 2 : tracks.length >= 2;
 
@@ -665,6 +666,7 @@ export default function Listener() {
                 onClick={handleSave}
                 disabled={!hasUnsavedChanges || createProject.mutation.isPending}
                 title="Save project"
+                aria-label="Save project"
               >
                 {createProject.mutation.isPending ? (
                   <span className="spinner spinner-btn" />
@@ -709,7 +711,7 @@ export default function Listener() {
             )}
             <button
               type="button"
-              className="btn-header btn-login"
+              className="btn-header btn-header-text"
               onClick={() => {
                 if (hasUnsavedChanges) {
                   setShowDiscardConfirm(true);
@@ -721,13 +723,20 @@ export default function Listener() {
               }}
               title="Create new AB test"
             >
-              + New
+              + New Project
             </button>
+            <Link to="/projects" className="btn-header btn-header-text" title="My projects">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+              Projects
+            </Link>
             <button
               type="button"
               className="btn-header"
               onClick={() => setShowHelp(true)}
               title="Help"
+              aria-label="Help"
             >
               ?
             </button>
@@ -761,7 +770,7 @@ export default function Listener() {
             ) : (
               <button
                 type="button"
-                className="btn-header btn-login"
+                className="btn-header btn-header-text"
                 onClick={() => {
                   ensureUser().catch((err) =>
                     console.error("Login failed:", err)
@@ -780,6 +789,7 @@ export default function Listener() {
               onClick={handlePlayPause}
               disabled={!isReady}
               title={isPlaying ? "Pause" : "Play"}
+              aria-label={isPlaying ? "Pause" : "Play"}
             >
               {isPlaying ? "⏸" : "▶"}
             </button>
@@ -790,6 +800,8 @@ export default function Listener() {
                     className="editable-title"
                     contentEditable
                     suppressContentEditableWarning
+                    role="textbox"
+                    aria-label="Project name"
                     onBlur={(e) => setEditableName(e.currentTarget.textContent || "")}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
                     dangerouslySetInnerHTML={{ __html: editableName }}
@@ -799,6 +811,8 @@ export default function Listener() {
                     className="editable-question listener-question"
                     contentEditable
                     suppressContentEditableWarning
+                    role="textbox"
+                    aria-label="Question for listeners"
                     onBlur={(e) => setEditableQuestion(e.currentTarget.textContent || "")}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
                     dangerouslySetInnerHTML={{ __html: editableQuestion }}
@@ -1516,18 +1530,14 @@ export default function Listener() {
                   <label>Analysis link</label>
                   <div className="share-link-row">
                     <input type="text" readOnly value={analyzeUrl} />
-                    <button type="button" className="btn-primary btn-sm" onClick={() => handleCopyLink(analyzeUrl)}>
-                      {copied ? "Copied!" : "Copy"}
-                    </button>
+                    <CopyButton url={analyzeUrl} />
                   </div>
                 </div>
                 <div className="share-link-group">
                   <label>Blind test link</label>
                   <div className="share-link-row">
                     <input type="text" readOnly value={blindUrl} />
-                    <button type="button" className="btn-primary btn-sm" onClick={() => handleCopyLink(blindUrl)}>
-                      {copied ? "Copied!" : "Copy"}
-                    </button>
+                    <CopyButton url={blindUrl} />
                   </div>
                 </div>
               </div>

@@ -106,6 +106,20 @@ a:focus-visible,
   z-index: 1;
 }
 
+.header-logo {
+  display: flex;
+  align-items: center;
+  color: var(--text);
+  text-decoration: none;
+}
+.header-logo svg {
+  height: 20px;
+  width: auto;
+}
+.header-actions .header-logo {
+  margin-right: auto;
+}
+
 .page-header {
   display: flex;
   align-items: center;
@@ -471,8 +485,12 @@ a:focus-visible,
   flex-shrink: 0;
 }
 
+.header-actions:has(.header-logo) {
+  width: 100%;
+  margin-left: 0;
+}
+
 .listener-page .header-actions {
-  align-self: flex-end;
   margin-left: 0;
 }
 
@@ -1336,6 +1354,7 @@ kbd {
 .blind-top-bar {
   position: fixed;
   top: 12px;
+  left: 24px;
   right: 24px;
   z-index: 10;
 }

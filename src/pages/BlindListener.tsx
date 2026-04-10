@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useSyncedWaveforms } from "../hooks/useSyncedWaveforms";
 import { usePlaylistTracks } from "../hooks/usePlaylistTracks";
 import { getStreamUrls } from "../lib/streamUrl";
+import type { TrackSource } from "../lib/waveforms";
 import type { Track } from "@audius/sdk";
 import { useAuth } from "../hooks/useAuth";
 import { useBlindSubmit } from "../hooks/useBlindSubmit";
@@ -40,18 +41,17 @@ export default function BlindListener() {
     Math.random() < 0.5 ? [0, 1] : [1, 0]
   );
 
-  const streamUrlSets = useMemo(
-    () =>
-      tracks.length === 2
-        ? [tracks[shuffleMap[0]], tracks[shuffleMap[1]]].map((t) => getStreamUrls(t.stream))
-        : tracks.map((t) => getStreamUrls(t.stream)),
-    [tracks, shuffleMap]
-  );
-  const trackIds = useMemo(
-    () =>
-      tracks.length === 2
-        ? [tracks[shuffleMap[0]].id, tracks[shuffleMap[1]].id]
-        : tracks.map((t) => t.id),
+  const waveformSources: TrackSource[] = useMemo(
+    () => {
+      const ordered = tracks.length === 2
+        ? [tracks[shuffleMap[0]], tracks[shuffleMap[1]]]
+        : tracks;
+      return ordered.map((t) => ({
+        type: 'url' as const,
+        urls: getStreamUrls(t.stream),
+        trackId: t.id,
+      }));
+    },
     [tracks, shuffleMap]
   );
 
@@ -65,7 +65,7 @@ export default function BlindListener() {
     seek,
     setActive,
     syncedRef,
-  } = useSyncedWaveforms(streamUrlSets, trackIds, undefined, () => {
+  } = useSyncedWaveforms(waveformSources, undefined, () => {
     setIsPlaying(false);
   });
 
@@ -349,7 +349,7 @@ export default function BlindListener() {
           <button
             type="button"
             className="btn-header btn-login"
-            onClick={() => navigate("/create")}
+            onClick={() => navigate("/analyze")}
             title="Create new AB test"
           >
             + New

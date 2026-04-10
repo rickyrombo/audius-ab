@@ -904,6 +904,9 @@ kbd {
 .waveform-area-center {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .waveform-track-group {
@@ -948,6 +951,8 @@ kbd {
   border-radius: var(--radius);
   padding: 6px 14px;
   transition: border-color 0.15s;
+  flex-shrink: 0;
+  position: relative;
 }
 .waveform-row.track-a {
   border-color: color-mix(in srgb, var(--color-a, #e06030) 25%, var(--border));
@@ -990,6 +995,16 @@ kbd {
 .track-toggle-btn.track-a:hover:not(.active) {
   border-color: var(--color-a, #e06030);
   color: var(--text);
+}
+.track-toggle-btn .toggle-playpause {
+  display: none;
+  font-size: 11px;
+}
+.track-toggle-btn.active:hover .toggle-letter {
+  display: none;
+}
+.track-toggle-btn.active:hover .toggle-playpause {
+  display: inline;
 }
 .track-toggle-btn.track-b:hover:not(.active) {
   border-color: var(--color-b, #3080e0);
@@ -1139,7 +1154,7 @@ kbd {
   flex: 1;
   resize: none;
   overflow: hidden;
-  min-height: unset;
+  min-height: 33px;
   height: auto;
   line-height: 1.5;
   padding: 6px 10px;
@@ -1503,6 +1518,7 @@ kbd {
 .analyzer-overlay-bar {
   display: flex;
   justify-content: flex-end;
+  gap: 6px;
   padding: 4px 12px 2px;
   grid-row: overlay-bar;
 }
@@ -1517,6 +1533,10 @@ kbd {
   font-weight: 700;
   letter-spacing: 0.3px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1;
 }
 .overlay-toggle:hover {
   color: var(--text);
@@ -1983,6 +2003,149 @@ kbd {
   .comments-columns {
     flex-direction: column;
   }
+}
+
+/* ══════════════════════════════════════
+   Create Mode (inline in Listener)
+   ══════════════════════════════════════ */
+
+.hidden-file-input {
+  display: none;
+}
+
+.waveform-dropzone {
+  border-style: dashed;
+}
+
+.waveform-dropzone.track-a {
+  border-color: #e06030;
+}
+
+.waveform-dropzone.track-b {
+  border-color: #3080e0;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: inherit;
+  z-index: 10;
+  pointer-events: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.dropzone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.dropzone-label {
+  font-size: 24px;
+  font-weight: 700;
+  opacity: 0.5;
+}
+
+.dropzone-text {
+  font-size: 13px;
+}
+
+.editable-title,
+.editable-question {
+  outline: none;
+  cursor: text;
+  border-radius: 3px;
+}
+
+.editable-title:hover,
+.editable-question:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.editable-title:focus,
+.editable-question:focus {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.editable-title:empty::before,
+.editable-question:empty::before {
+  content: attr(data-placeholder);
+  color: rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+}
+
+.btn-save,
+.btn-save,
+.btn-share {
+  width: auto;
+  border-radius: var(--radius);
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  line-height: 1;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btn-save {
+  background: #e60000 !important;
+  color: #fff !important;
+}
+
+
+.btn-save svg,
+.btn-share svg {
+  flex-shrink: 0;
+}
+
+.btn-save:disabled,
+.btn-share:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.share-links {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.share-link-group label {
+  display: block;
+  font-size: 12px;
+  color: #9f9fa9;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.share-link-row {
+  display: flex;
+  gap: 8px;
+}
+
+.share-link-row input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #fafafa;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: monospace;
+  min-width: 0;
 }
 
 /* ══════════════════════════════════════

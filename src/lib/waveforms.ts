@@ -2,6 +2,10 @@ import { analyzeWaveformColors, analyzeLoudness, detectBPM, type WaveformColorDa
 import { getCachedAudio, setCachedAudio, getCachedWaveform, setCachedWaveform } from "./audioCache";
 import { fetchWithMirrors } from "./streamUrl";
 
+export type TrackSource =
+  | { type: 'url'; urls: string[]; trackId: string }
+  | { type: 'file'; file: File; localId: string }
+
 type ReadyCallback = () => void;
 type TimeUpdateCallback = (time: number, duration: number) => void;
 type SeekCallback = (time: number) => void;
@@ -74,16 +78,21 @@ export class SyncedWaveforms {
     this.silentGain.connect(this.audioCtx.destination);
   }
 
-  async load(streamUrlSets: string[][], trackIds: string[]): Promise<void> {
+  async load(sources: TrackSource[]): Promise<void> {
     if (this.destroyed) return;
 
-    // Fetch + decode all tracks in parallel (with cache by track ID)
+    // Fetch + decode all tracks in parallel
     const buffers = await Promise.all(
-      streamUrlSets.map(async (urls, i) => {
-        const cacheKey = trackIds[i];
+      sources.map(async (src) => {
+        if (src.type === 'file') {
+          const ab = await src.file.arrayBuffer();
+          return this.audioCtx.decodeAudioData(ab);
+        }
+        // type === 'url' — fetch with mirror fallback + IDB cache
+        const cacheKey = src.trackId;
         let ab = await getCachedAudio(cacheKey);
         if (!ab) {
-          const resp = await fetchWithMirrors(urls);
+          const resp = await fetchWithMirrors(src.urls);
           ab = await resp.arrayBuffer();
           setCachedAudio(cacheKey, ab.slice(0));
         }
@@ -165,15 +174,19 @@ export class SyncedWaveforms {
       this.trackKWeightedAnalysers[i].connect(this.silentGain);
     }
 
-    // Analyze waveform colors for each track (with cache by track ID)
+    // Analyze waveform colors for each track (with cache by track ID when available)
     this.colorData = await Promise.all(
       buffers.map(async (buf, i) => {
-        const cacheKey = trackIds[i];
-        const cached = await getCachedWaveform(cacheKey);
-        if (cached) return cached;
-        const data = analyzeWaveformColors(buf);
-        setCachedWaveform(cacheKey, data);
-        return data;
+        const src = sources[i];
+        if (src.type === 'url') {
+          const cached = await getCachedWaveform(src.trackId);
+          if (cached) return cached;
+          const data = analyzeWaveformColors(buf);
+          setCachedWaveform(src.trackId, data);
+          return data;
+        }
+        // Local file — no persistent cache
+        return analyzeWaveformColors(buf);
       }),
     );
 

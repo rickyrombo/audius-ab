@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SyncedWaveforms } from '../lib/waveforms'
 
-type SpaceMode = 'polar-sample' | 'polar-level' | 'lissajous'
+export type SpaceMode = 'polar-sample' | 'polar-level' | 'lissajous'
 
 const MODE_LABELS: Record<SpaceMode, string> = {
   'polar-sample': 'Polar Sample',
@@ -16,6 +16,8 @@ interface Props {
   accentColor?: string
   otherAccentColor?: string
   showOverlay?: boolean
+  mode?: SpaceMode
+  onModeChange?: (mode: SpaceMode) => void
 }
 
 // Fixed-size particle pool using typed arrays — zero per-frame allocation
@@ -44,10 +46,13 @@ export default function SpaceAnalyzer({
   syncedRef, isPlaying, trackIndex,
   accentColor = '#b48cff', otherAccentColor = '#888888',
   showOverlay = false,
+  mode: controlledMode, onModeChange,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
-  const [mode, setMode] = useState<SpaceMode>('polar-sample')
+  const [uncontrolledMode, setUncontrolledMode] = useState<SpaceMode>('polar-sample')
+  const mode = controlledMode ?? uncontrolledMode
+  const setMode = (m: SpaceMode) => { onModeChange ? onModeChange(m) : setUncontrolledMode(m) }
   const modeRef = useRef<SpaceMode>(mode)
   modeRef.current = mode
   const showOverlayRef = useRef(false)

@@ -98,7 +98,7 @@ export default function LandingPage() {
                 of your mastering and mixing decisions.
               </p>
               <div className="landing-cta-row">
-                <Link to="/create" className="landing-btn landing-btn-primary">
+                <Link to="/analyze" className="landing-btn landing-btn-primary">
                   Get Started
                   <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="4" y1="10" x2="16" y2="10" />

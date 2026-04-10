@@ -12,15 +12,18 @@ export function usePlaylistTracks(playlistId: string | undefined) {
       if (!playlist) throw new Error('Playlist not found')
 
       const trackIds = playlist.playlistContents.map((c) => c.trackId).filter(Boolean)
-      if (!trackIds.length) throw new Error('No tracks in playlist')
 
-      const bulkResp = await sdk.tracks.getBulkTracks({ id: trackIds })
-      const bulkTracks = bulkResp.data ?? []
+      if (trackIds.length) {
+        const bulkResp = await sdk.tracks.getBulkTracks({ id: trackIds })
+        const bulkTracks = bulkResp.data ?? []
 
-      // Preserve playlist order
-      playlist.tracks = trackIds
-        .map((id) => bulkTracks.find((bt) => bt.id === id))
-        .filter((t): t is Track => t != null)
+        // Preserve playlist order
+        playlist.tracks = trackIds
+          .map((id) => bulkTracks.find((bt) => bt.id === id))
+          .filter((t): t is Track => t != null)
+      } else {
+        playlist.tracks = []
+      }
 
       return playlist
     },

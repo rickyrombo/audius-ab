@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { SyncedWaveforms } from '../lib/waveforms'
 import type { LoudnessStats } from '../lib/waveformAnalysis'
 
+export type GraphMetric = 'peak' | 'rms' | 'momentary' | 'short' | 'integrated'
+
 interface Props {
   syncedRef: React.MutableRefObject<SyncedWaveforms | null>
   isPlaying: boolean
@@ -10,6 +12,8 @@ interface Props {
   otherAccentColor?: string
   showOverlay?: boolean
   loudnessStats?: LoudnessStats | null
+  graphMetric?: GraphMetric
+  onGraphMetricChange?: (metric: GraphMetric) => void
 }
 
 // ITU-R BS.1770 / EBU R128 constants
@@ -20,8 +24,6 @@ const RELATIVE_GATE_OFFSET = -10 // dB below ungated mean
 
 const HISTORY_DURATION_S = 30
 const HISTORY_INTERVAL_MS = 50
-
-type GraphMetric = 'peak' | 'rms' | 'momentary' | 'short' | 'integrated'
 
 const METRIC_LABELS: Record<GraphMetric, string> = {
   peak: 'Peak',
@@ -103,10 +105,13 @@ export default function VolumeIndicator({
   accentColor = '#cc0000', otherAccentColor = '#888888',
   showOverlay = false,
   loudnessStats,
+  graphMetric: controlledMetric, onGraphMetricChange,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
-  const [graphMetric, setGraphMetric] = useState<GraphMetric>('short')
+  const [uncontrolledMetric, setUncontrolledMetric] = useState<GraphMetric>('short')
+  const graphMetric = controlledMetric ?? uncontrolledMetric
+  const setGraphMetric = (m: GraphMetric) => { onGraphMetricChange ? onGraphMetricChange(m) : setUncontrolledMetric(m) }
   const graphMetricRef = useRef<GraphMetric>(graphMetric)
   graphMetricRef.current = graphMetric
   const showOverlayRef = useRef(false)
@@ -120,6 +125,7 @@ export default function VolumeIndicator({
 
   // Persistent track states that survive prop changes
   const trackStatesRef = useRef<(TrackLoudnessState | null)[]>([null, null])
+  const lastSyncedRef = useRef<SyncedWaveforms | null>(null)
   const lastHistoryPushRef = useRef(0)
 
   useEffect(() => {
@@ -129,6 +135,12 @@ export default function VolumeIndicator({
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+
+    // Reset track states when the synced instance changes (new audio loaded)
+    if (synced !== lastSyncedRef.current) {
+      trackStatesRef.current = [null, null]
+      lastSyncedRef.current = synced
+    }
 
     const sampleRate = synced.getSampleRate()
     const maxHistoryPoints = Math.ceil(HISTORY_DURATION_S * (1000 / HISTORY_INTERVAL_MS))

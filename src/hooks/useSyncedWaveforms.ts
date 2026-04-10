@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { SyncedWaveforms } from "../lib/waveforms";
+import { SyncedWaveforms, type TrackSource } from "../lib/waveforms";
 import type { WaveformColorData, LoudnessStats } from "../lib/waveformAnalysis";
 
+function sourceKey(sources: TrackSource[]): string {
+  return sources
+    .map((s) =>
+      s.type === "url"
+        ? s.urls.join("|")
+        : `${s.file.name}:${s.file.size}:${s.file.lastModified}`,
+    )
+    .join(",");
+}
+
 export function useSyncedWaveforms(
-  streamUrlSets: string[][],
-  trackIds: string[],
+  sources: TrackSource[],
   onSeekWhilePaused?: (time: number) => void,
   onFinish?: () => void,
 ) {
@@ -21,10 +30,10 @@ export function useSyncedWaveforms(
   const finishRef = useRef(onFinish);
   finishRef.current = onFinish;
 
-  const urlKey = streamUrlSets.join(",");
+  const key = sourceKey(sources);
 
   useEffect(() => {
-    if (!streamUrlSets.length) return;
+    if (!sources.length) return;
 
     const synced = new SyncedWaveforms();
     syncedRef.current = synced;
@@ -39,10 +48,10 @@ export function useSyncedWaveforms(
       setIsReady(true);
       setDuration(synced.getDuration());
       setTrackDurations(synced.getTrackDurations());
-      setColorData(streamUrlSets.map((_, i) => synced.getColorData(i)));
-      const detectedBpms = streamUrlSets.map((_, i) => synced.getBPM(i));
+      setColorData(sources.map((_, i) => synced.getColorData(i)));
+      const detectedBpms = sources.map((_, i) => synced.getBPM(i));
       setBpms(detectedBpms);
-      setLoudnessStats(streamUrlSets.map((_, i) => synced.getLoudnessStats(i)));
+      setLoudnessStats(sources.map((_, i) => synced.getLoudnessStats(i)));
       console.log('[BPM]', detectedBpms.map((bpm, i) => `Track ${i}: ${bpm} BPM`).join(', '));
     });
     let lastStateUpdate = 0;
@@ -60,14 +69,14 @@ export function useSyncedWaveforms(
     synced.onFinish(() => {
       finishRef.current?.();
     });
-    synced.load(streamUrlSets, trackIds);
+    synced.load(sources);
 
     return () => {
       synced.destroy();
       syncedRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlKey]);
+  }, [key]);
 
   return {
     isReady,

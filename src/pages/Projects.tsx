@@ -77,7 +77,7 @@ export default function Projects() {
       ) : projects.length === 0 ? (
         <div className="projects-empty">
           <p>No projects yet.</p>
-          <Link to="/create" className="btn-primary">Create one</Link>
+          <Link to="/analyze" className="btn-primary">Create one</Link>
         </div>
       ) : (
         <div className="projects-list">
@@ -132,7 +132,7 @@ export default function Projects() {
       )}
 
       <div className="projects-footer">
-        <Link to="/create" className="btn-secondary">+ New Project</Link>
+        <Link to="/analyze" className="btn-secondary">+ New Project</Link>
       </div>
 
       {deleteConfirm && (

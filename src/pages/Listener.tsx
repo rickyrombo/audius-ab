@@ -275,7 +275,7 @@ export default function Listener() {
     duration,
     currentTime,
     bpms,
-    trackCount: tracks.length,
+    trackCount: isCreateMode ? createProject.tracks.length : tracks.length,
     syncedRef,
     seek,
     play,

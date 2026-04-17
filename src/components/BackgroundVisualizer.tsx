@@ -27,14 +27,14 @@ export default function BackgroundVisualizer() {
     window.addEventListener('resize', resize)
 
     // Particles for ambient motion
-    const NUM = 80
+    const NUM = 110
     const particles = Array.from({ length: NUM }, () => ({
       x: Math.random() * w,
       y: Math.random() * h,
-      vx: (Math.random() - 0.5) * 0.3,
-      vy: (Math.random() - 0.5) * 0.3,
-      radius: Math.random() * 2 + 1,
-      baseAlpha: Math.random() * 0.3 + 0.05,
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: (Math.random() - 0.5) * 0.4,
+      radius: Math.random() * 2.5 + 1.2,
+      baseAlpha: Math.random() * 0.45 + 0.15,
     }))
 
     let t = 0
@@ -56,7 +56,7 @@ export default function BackgroundVisualizer() {
 
       // Gentle sinusoidal pulse over the full bar
       const beatWave = (1 + Math.cos(beatPhase * Math.PI * 2)) * 0.5 // 0..1 smooth
-      const pulse = playingRef.current ? beatWave * 0.35 : 0
+      const pulse = playingRef.current ? beatWave * 0.7 : 0
 
       ctx!.setTransform(1, 0, 0, 1, 0, 0)
       ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
@@ -75,17 +75,17 @@ export default function BackgroundVisualizer() {
       const b = brightness
 
       const g1 = ctx!.createRadialGradient(cx1, cy1, 0, cx1, cy1, maxDim * 0.8)
-      g1.addColorStop(0, `rgba(95, 20, 15, ${0.05 + b * 0.13})`)
-      g1.addColorStop(0.4, `rgba(75, 15, 10, ${0.03 + b * 0.07})`)
-      g1.addColorStop(0.7, `rgba(50, 10, 8, ${0.01 + b * 0.03})`)
+      g1.addColorStop(0, `rgba(130, 30, 20, ${0.10 + b * 0.28})`)
+      g1.addColorStop(0.4, `rgba(100, 20, 14, ${0.06 + b * 0.16})`)
+      g1.addColorStop(0.7, `rgba(60, 12, 10, ${0.02 + b * 0.07})`)
       g1.addColorStop(1, 'rgba(0, 0, 0, 0)')
       ctx!.fillStyle = g1
       ctx!.fillRect(0, 0, w, h)
 
       const g2 = ctx!.createRadialGradient(cx2, cy2, 0, cx2, cy2, maxDim * 0.7)
-      g2.addColorStop(0, `rgba(100, 30, 15, ${0.04 + b * 0.10})`)
-      g2.addColorStop(0.4, `rgba(80, 20, 10, ${0.02 + b * 0.05})`)
-      g2.addColorStop(0.7, `rgba(50, 12, 8, ${0.01 + b * 0.02})`)
+      g2.addColorStop(0, `rgba(140, 45, 20, ${0.08 + b * 0.22})`)
+      g2.addColorStop(0.4, `rgba(110, 30, 14, ${0.04 + b * 0.12})`)
+      g2.addColorStop(0.7, `rgba(60, 15, 10, ${0.02 + b * 0.05})`)
       g2.addColorStop(1, 'rgba(0, 0, 0, 0)')
       ctx!.fillStyle = g2
       ctx!.fillRect(0, 0, w, h)
@@ -94,7 +94,7 @@ export default function BackgroundVisualizer() {
       const radiusMul = 1 + pulse * 0.4
       const alphaMul = 1 + pulse * 0.6
       for (const p of particles) {
-        const speed = 1 + pulse * 0.5
+        const speed = 1 + b * 2.5 + pulse * 1.5
         p.x += p.vx * speed
         p.y += p.vy * speed
         if (p.x < 0) p.x = w
@@ -104,7 +104,7 @@ export default function BackgroundVisualizer() {
 
         ctx!.beginPath()
         ctx!.arc(p.x, p.y, p.radius * radiusMul, 0, Math.PI * 2)
-        ctx!.fillStyle = `rgba(220, 140, 120, ${Math.min(1, p.baseAlpha * alphaMul)})`
+        ctx!.fillStyle = `rgba(235, 160, 135, ${Math.min(1, p.baseAlpha * alphaMul)})`
         ctx!.fill()
       }
 
@@ -119,8 +119,8 @@ export default function BackgroundVisualizer() {
             ctx!.beginPath()
             ctx!.moveTo(particles[i].x, particles[i].y)
             ctx!.lineTo(particles[j].x, particles[j].y)
-            ctx!.strokeStyle = `rgba(180, 120, 100, ${(1 - dist / connectDist) * (0.08 + pulse * 0.04)})`
-            ctx!.lineWidth = 0.5 + pulse * 0.3
+            ctx!.strokeStyle = `rgba(210, 140, 115, ${(1 - dist / connectDist) * (0.18 + pulse * 0.10)})`
+            ctx!.lineWidth = 0.7 + pulse * 0.5
             ctx!.stroke()
           }
         }
